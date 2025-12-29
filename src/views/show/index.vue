@@ -6,6 +6,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 import { logger } from '@/utils/logger'
 
 // ------------------------------------------------------------
@@ -15,6 +16,7 @@ const route = useRoute()
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // ------------------------------------------------------------
 // State
@@ -50,6 +52,13 @@ async function fetchShowData() {
     ])
     if (showData) {
       show.value = showData
+      // Set mappable content for button mapping
+      uiStore.setMappableContent({
+        id: showId.value,
+        type: 'show',
+        image: showData.images?.[0]?.url || '',
+        name: showData.name || 'Unknown Show'
+      })
     }
     if (episodesData?.items) {
       episodes.value = episodesData.items

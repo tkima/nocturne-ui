@@ -6,6 +6,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 import { logger } from '@/utils/logger'
 
 // ------------------------------------------------------------
@@ -15,6 +16,7 @@ const route = useRoute()
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // ------------------------------------------------------------
 // State
@@ -51,6 +53,14 @@ async function fetchAlbumData() {
       album.value = data
       tracks.value = data.tracks?.items || []
       logger.info('Album loaded', { albumId: albumId.value, trackCount: tracks.value.length })
+
+      // Set mappable content for button mapping
+      uiStore.setMappableContent({
+        id: albumId.value,
+        type: 'album',
+        image: data.images?.[0]?.url || '',
+        name: data.name || 'Unknown Album'
+      })
     }
   } catch (err) {
     logger.error('Failed to load album', { error: err })

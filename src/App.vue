@@ -13,8 +13,10 @@ import { useConfigStore } from '@/stores/config'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useNetwork } from '@/composables/useNetwork'
 import { useBluetooth } from '@/composables/useBluetooth'
-import { getPreset, shouldIgnoreRelease } from '@/composables/useButtonMapping'
+import { getPreset } from '@/composables/useButtonMapping'
 import { logger } from '@/utils/logger'
+
+const LONG_PRESS_DURATION = 2000 // 2 seconds for long press to map
 
 const uiStore = useUiStore()
 const route = useRoute()
@@ -37,10 +39,14 @@ const previousRoute = ref('/recents')
 let holdTimer: ReturnType<typeof setTimeout> | null = null
 let longPressTriggered = false
 
-// Button mapping overlay state (for short press preset playback)
+// Button mapping overlay state (for short press preset playback and long press mapping)
 const showMappingOverlay = ref(false)
 const activePresetButton = ref<string | null>(null)
 let isPlayingPreset = false
+
+// Long press button mapping state
+const buttonHoldTimers: Record<string, ReturnType<typeof setTimeout> | null> = {}
+let longPressButtonTriggered = false
 
 const isFullscreenRoute = computed(() =>
   route.path === '/now-playing' ||
@@ -106,6 +112,64 @@ function handleKeyUp(e: KeyboardEvent) {
   }
 }
 
+// Save button mapping from current mappable content
+function saveButtonMapping(buttonNumber: string) {
+  const { id, type, image, name } = uiStore.mappableContent
+
+  if (!id || !type) {
+    logger.warn('Cannot save button mapping - no mappable content', { id, type })
+    return
+  }
+
+  localStorage.setItem(`button${buttonNumber}Id`, id)
+  localStorage.setItem(`button${buttonNumber}Type`, type)
+  localStorage.setItem(`button${buttonNumber}Image`, image || '')
+  localStorage.setItem(`button${buttonNumber}Name`, name || '')
+
+  logger.info('Button mapping saved', {
+    button: buttonNumber,
+    id,
+    type,
+    name
+  })
+}
+
+// Button 1-4 keydown handler - start long press timer for mapping
+function handleButtonKeyDown(e: KeyboardEvent) {
+  const validButtons = ['1', '2', '3', '4']
+  if (!validButtons.includes(e.key)) return
+  if (!authStore.isAuthenticated || powerMenuVisible.value) return
+
+  const buttonNumber = e.key
+
+  // Don't start a new timer if one is already running
+  if (buttonHoldTimers[buttonNumber]) return
+
+  buttonHoldTimers[buttonNumber] = setTimeout(() => {
+    // Long press triggered - save mapping
+    longPressButtonTriggered = true
+
+    // Only save if we have mappable content
+    if (uiStore.mappableContent.id && uiStore.mappableContent.type) {
+      saveButtonMapping(buttonNumber)
+
+      // Show the mapping overlay
+      activePresetButton.value = buttonNumber
+      showMappingOverlay.value = true
+
+      // Hide after a moment
+      setTimeout(() => {
+        showMappingOverlay.value = false
+        activePresetButton.value = null
+      }, 1500)
+    } else {
+      logger.info('No mappable content for long press', { button: buttonNumber })
+    }
+
+    buttonHoldTimers[buttonNumber] = null
+  }, LONG_PRESS_DURATION)
+}
+
 // Button 1-4 short press handler - play saved presets
 async function handleButtonPress(buttonNumber: string) {
   if (!authStore.isAuthenticated || isPlayingPreset || powerMenuVisible.value) return
@@ -161,26 +225,51 @@ async function handleButtonPress(buttonNumber: string) {
     logger.error('Failed to play preset', { error: err })
   }
 
-  // Hide overlay after a moment
-  setTimeout(() => {
+  // Hide overlay after 2 seconds, then refresh playback if on now-playing
+  setTimeout(async () => {
     showMappingOverlay.value = false
     activePresetButton.value = null
     isPlayingPreset = false
-  }, 1500)
+
+    // If on now-playing, fetch updated playback to refresh album art
+    if (route.path === '/now-playing') {
+      await spotifyStore.fetchCurrentPlayback()
+    }
+  }, 2000)
 }
 
 function handleButtonKeyUp(e: KeyboardEvent) {
   const validButtons = ['1', '2', '3', '4']
   if (!validButtons.includes(e.key)) return
 
+  const buttonNumber = e.key
+
+  // Clear the long press timer if it's still running
+  if (buttonHoldTimers[buttonNumber]) {
+    clearTimeout(buttonHoldTimers[buttonNumber]!)
+    buttonHoldTimers[buttonNumber] = null
+  }
+
   // Check if long press just triggered (mapping was saved)
-  if (shouldIgnoreRelease()) {
-    logger.info('Ignoring button release after long press', { button: e.key })
+  if (longPressButtonTriggered) {
+    logger.info('Ignoring button release after long press', { button: buttonNumber })
+    longPressButtonTriggered = false
     return
   }
 
   // Short press - play the preset
-  handleButtonPress(e.key)
+  handleButtonPress(buttonNumber)
+}
+
+// Back button handler - navigate back to recents from network screen when authenticated
+function handleBackButton(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+
+  // If on network screen and authenticated, go to recents
+  if (route.path === '/auth/network' && authStore.isAuthenticated) {
+    e.stopPropagation()
+    router.push('/recents')
+  }
 }
 
 function handleShutdown() {
@@ -242,16 +331,24 @@ onMounted(async () => {
 
   window.addEventListener('keydown', handleKeyDown, { capture: true })
   window.addEventListener('keyup', handleKeyUp, { capture: true })
+  window.addEventListener('keydown', handleButtonKeyDown)
   window.addEventListener('keyup', handleButtonKeyUp)
+  window.addEventListener('keydown', handleBackButton, { capture: true })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, { capture: true })
   window.removeEventListener('keyup', handleKeyUp, { capture: true })
+  window.removeEventListener('keydown', handleButtonKeyDown)
   window.removeEventListener('keyup', handleButtonKeyUp)
+  window.removeEventListener('keydown', handleBackButton, { capture: true })
   if (holdTimer) {
     clearTimeout(holdTimer)
   }
+  // Clear any pending button timers
+  Object.values(buttonHoldTimers).forEach(timer => {
+    if (timer) clearTimeout(timer)
+  })
 })
 </script>
 

@@ -6,10 +6,9 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 import { createButtonHandler } from '@/composables/useButtonAction'
-import { useButtonMapping } from '@/composables/useButtonMapping'
 import ProgressBar from '@/components/player/ProgressBar.vue'
-import ButtonMappingOverlay from '@/components/common/ButtonMappingOverlay.vue'
 import {
   HeartIcon,
   PlayIcon,
@@ -28,6 +27,7 @@ import { logger } from '@/utils/logger'
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // ------------------------------------------------------------
 // State
@@ -219,15 +219,18 @@ const mappingContent = computed(() => {
 })
 
 // ------------------------------------------------------------
-// Button Mapping (long press 1-4 to save preset)
+// Update global mappable content when playback changes
 // ------------------------------------------------------------
-const { showMappingOverlay, activeButton, startListening: startButtonMapping, stopListening: stopButtonMapping } = useButtonMapping(() => ({
-  contentId: mappingContent.value.id,
-  contentType: mappingContent.value.type,
-  contentImage: albumArt.value,
-  contentName: trackName.value,
-  isActive: true, // Always listen for button presses
-}))
+watch(mappingContent, (content) => {
+  if (content.id && content.type) {
+    uiStore.setMappableContent({
+      id: content.id,
+      type: content.type,
+      image: albumArt.value,
+      name: trackName.value
+    })
+  }
+}, { immediate: true })
 
 // ------------------------------------------------------------
 // Close/Back handler
@@ -500,7 +503,6 @@ async function checkIfLiked() {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('wheel', handleWheel, { passive: false })
-  startButtonMapping()
 
   // Attach swipe listeners with passive: false to allow preventDefault
   if (swipeAreaRef.value) {
@@ -538,7 +540,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('wheel', handleWheel)
-  stopButtonMapping()
   stopProgressTracking()
   stopPlaybackPolling()
   if (seekDebounceTimeout) {
@@ -557,12 +558,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Button Mapping Overlay -->
-  <ButtonMappingOverlay
-    :show="showMappingOverlay"
-    :active-button="activeButton"
-  />
-
   <div class="flex flex-col gap-1 h-screen w-full z-10 fadeIn-animation">
       <!-- Error Banner (No Active Device) -->
       <div

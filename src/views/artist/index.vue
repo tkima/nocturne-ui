@@ -6,6 +6,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 import { logger } from '@/utils/logger'
 import type { Artist, Track } from '@/types'
 
@@ -16,6 +17,7 @@ const route = useRoute()
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // ------------------------------------------------------------
 // State
@@ -61,6 +63,14 @@ async function fetchArtistData() {
 
     if (artistData) {
       artist.value = artistData
+
+      // Set mappable content for button mapping
+      uiStore.setMappableContent({
+        id: artistId.value,
+        type: 'artist',
+        image: artistData.images?.[0]?.url || '',
+        name: artistData.name || 'Unknown Artist'
+      })
     }
     if (topTracksData?.tracks) {
       tracks.value = topTracksData.tracks

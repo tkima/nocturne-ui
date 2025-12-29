@@ -2,7 +2,7 @@
      Virtual Keyboard - On-screen keyboard for touchscreen input
      ============================================================ -->
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import Keyboard from 'simple-keyboard'
 import 'simple-keyboard/build/css/index.css'
 
@@ -51,21 +51,24 @@ const layouts = {
 }
 
 const display = {
-  '{bksp}': '⌫',
+  '{bksp}': 'del',
   '{enter}': 'return',
-  '{shift}': '⇧',
-  '{lock}': '⇪',
+  '{shift}': 'shift',
+  '{lock}': 'caps',
   '{space}': 'space',
   '{numbers}': '?123',
   '{symbols}': '#+=',
   '{default}': 'ABC',
-  '{hide}': '⌨'
+  '{hide}': 'hide'
 }
 
 function onKeyPress(button: string) {
+  console.log('[VirtualKeyboard] onKeyPress:', button)
   if (button === '{bksp}') {
     emit('update:modelValue', props.modelValue.slice(0, -1))
   } else if (button === '{enter}') {
+    // Submit/done - emit enter to trigger form submission
+    console.log('[VirtualKeyboard] Emitting enter event')
     emit('enter')
   } else if (button === '{space}') {
     emit('update:modelValue', props.modelValue + ' ')
@@ -98,7 +101,12 @@ function onKeyPress(button: string) {
 }
 
 function initKeyboard() {
-  if (!keyboardRef.value) return
+  if (!keyboardRef.value) {
+    console.log('[VirtualKeyboard] initKeyboard: keyboardRef is null')
+    return
+  }
+
+  console.log('[VirtualKeyboard] initKeyboard: Creating keyboard instance')
 
   keyboard = new Keyboard(keyboardRef.value, {
     onChange: () => {},
@@ -112,6 +120,8 @@ function initKeyboard() {
       { class: 'hg-green', buttons: '{enter}' }
     ]
   })
+
+  console.log('[VirtualKeyboard] Keyboard instance created:', keyboard ? 'success' : 'failed')
 }
 
 function destroyKeyboard() {
@@ -121,12 +131,12 @@ function destroyKeyboard() {
   }
 }
 
-watch(() => props.visible, (visible) => {
+watch(() => props.visible, async (visible) => {
+  console.log('[VirtualKeyboard] Visibility changed:', visible)
   if (visible) {
-    // Small delay to ensure DOM is ready
-    setTimeout(() => {
-      initKeyboard()
-    }, 50)
+    // Use nextTick to ensure DOM is ready
+    await nextTick()
+    initKeyboard()
   } else {
     destroyKeyboard()
   }
@@ -138,8 +148,10 @@ watch(() => props.modelValue, (value) => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
+  console.log('[VirtualKeyboard] onMounted, visible:', props.visible)
   if (props.visible) {
+    await nextTick()
     initKeyboard()
   }
 })
@@ -154,6 +166,9 @@ onUnmounted(() => {
     <div
       v-if="visible"
       class="fixed bottom-0 left-0 right-0 z-[110] p-4 bg-[#1a1a1a]/95 backdrop-blur-sm border-t border-white/10"
+      @click.stop
+      @mousedown.stop
+      @touchstart.stop
     >
       <div class="max-w-[800px] mx-auto">
         <div ref="keyboardRef" class="keyboard-container" />
