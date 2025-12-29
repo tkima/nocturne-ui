@@ -277,13 +277,17 @@ hasPasswordSecurity(flags): boolean
 
 ## Environment Variables
 
-```bash
-# .env.local (development)
-VITE_SPOTIFY_CLIENT_ID=your_client_id
+The app works out of the box with a shared Spotify Client ID (device auth flow). You only need to set environment variables if you want to use your own Client ID.
 
-# .env.production (device deployment)
-VITE_SPOTIFY_CLIENT_ID=your_client_id
-VITE_REDIRECT_URI=https://yourdomain.com/spotify.php
+```bash
+# .env (optional - only if using your own Spotify app)
+VITE_SPOTIFY_CLIENT_ID=your_32_char_client_id      # Your own Client ID
+VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php  # Your relay URL
+
+# Default behavior (no .env needed):
+# - Uses shared Client ID: 65b708073fc0480ea92a077233ca87bd
+# - Uses Spotify Device Authorization flow (QR code scan)
+# - No relay server required
 ```
 
 ## API Endpoints
