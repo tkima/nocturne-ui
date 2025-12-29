@@ -39,14 +39,48 @@ npx vue-tsc --noEmit
 ```bash
 # Build and deploy to Car Thing
 npm run build
-ssh root@172.16.42.2 "mount -o remount,rw /"
-scp -r dist/* root@172.16.42.2:/usr/share/nocturne-ui/
+ssh root@172.16.42.2 "mount -o remount,rw / && rm -rf /etc/nocturne/ui/assets/*"
+scp -r dist/* root@172.16.42.2:/etc/nocturne/ui/
 ssh root@172.16.42.2 "mount -o remount,ro / && sv restart chromium"
 ```
 
 **Device IPs:**
 - Host PC: `172.16.42.1`
 - Car Thing: `172.16.42.2`
+
+## Spotify Auth Relay (Optional)
+
+If you want to use your own Spotify Client ID instead of the shared one, you need to host the `spotify-relay.php` file on an HTTPS server.
+
+### Setup
+
+1. Upload `spotify-relay.php` to your HTTPS web server
+2. Create a Spotify App at https://developer.spotify.com/dashboard
+3. Set the Redirect URI to your relay URL (e.g., `https://yourdomain.com/spotify-relay.php`)
+4. Copy your Client ID and set in `.env`:
+
+```bash
+VITE_SPOTIFY_CLIENT_ID=your_32_char_client_id
+VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php
+```
+
+### Relay Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `?action=test` | Test relay is working, returns `{"status":"ok"}` |
+| `?action=start&client_id=XXX&session=YYY&code_challenge=ZZZ` | Start auth flow, returns Spotify auth URL for QR code |
+| `?action=check&session=YYY` | Poll for auth code after user authorizes |
+
+### How It Works
+
+1. Device calls `?action=start` with client ID, session ID, and PKCE code challenge
+2. Relay returns Spotify authorization URL (displayed as QR code)
+3. User scans QR, authorizes on Spotify
+4. Spotify redirects to relay with auth code
+5. Relay stores code, shows success page to user
+6. Device polls `?action=check` until code is available
+7. Device exchanges code for tokens locally (keeps code_verifier secret)
 
 ## Directory Structure
 
