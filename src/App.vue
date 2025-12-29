@@ -272,6 +272,17 @@ function handleBackButton(e: KeyboardEvent) {
   }
 }
 
+// Back button handler - navigate back to recents from network screen when authenticated
+function handleBackButton(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+
+  // If on network screen and authenticated, go to recents
+  if (route.path === '/auth/network' && authStore.isAuthenticated) {
+    e.stopPropagation()
+    router.push('/recents')
+  }
+}
+
 function handleShutdown() {
   fetch(`${config.nocturnedUrl}/device/power/shutdown`, {
     method: 'POST'
