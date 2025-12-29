@@ -46,7 +46,7 @@ interface SettingSection {
 const settingsStructure: Record<string, SettingSection> = {
   general: {
     title: 'General',
-    icon: '⚙️',
+    icon: 'G',
     items: [
       {
         id: 'start-with-now-playing',
@@ -60,7 +60,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   playback: {
     title: 'Playback',
-    icon: '▶️',
+    icon: 'P',
     items: [
       {
         id: 'track-scrolling',
@@ -98,7 +98,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   network: {
     title: 'Network',
-    icon: '📶',
+    icon: 'N',
     items: [
       {
         id: 'network-settings',
@@ -111,7 +111,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   account: {
     title: 'Account',
-    icon: '👤',
+    icon: 'A',
     items: [
       {
         id: 'profile-info',
@@ -128,7 +128,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   credits: {
     title: 'Credits',
-    icon: '❤️',
+    icon: 'C',
     items: [
       {
         id: 'developers',
@@ -146,7 +146,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   about: {
     title: 'About',
-    icon: 'ℹ️',
+    icon: 'i',
     items: [
       {
         id: 'version',
@@ -158,7 +158,7 @@ const settingsStructure: Record<string, SettingSection> = {
   },
   debug: {
     title: 'Debug',
-    icon: '🔧',
+    icon: 'D',
     items: [
       {
         id: 'api-test',

@@ -183,6 +183,17 @@ function handleButtonKeyUp(e: KeyboardEvent) {
   handleButtonPress(e.key)
 }
 
+// Back button handler - navigate back to recents from network screen when authenticated
+function handleBackButton(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+
+  // If on network screen and authenticated, go to recents
+  if (route.path === '/auth/network' && authStore.isAuthenticated) {
+    e.stopPropagation()
+    router.push('/recents')
+  }
+}
+
 function handleShutdown() {
   fetch(`${config.nocturnedUrl}/device/power/shutdown`, {
     method: 'POST'
@@ -243,12 +254,14 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown, { capture: true })
   window.addEventListener('keyup', handleKeyUp, { capture: true })
   window.addEventListener('keyup', handleButtonKeyUp)
+  window.addEventListener('keydown', handleBackButton, { capture: true })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, { capture: true })
   window.removeEventListener('keyup', handleKeyUp, { capture: true })
   window.removeEventListener('keyup', handleButtonKeyUp)
+  window.removeEventListener('keydown', handleBackButton, { capture: true })
   if (holdTimer) {
     clearTimeout(holdTimer)
   }

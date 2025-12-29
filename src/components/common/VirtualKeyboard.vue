@@ -51,21 +51,22 @@ const layouts = {
 }
 
 const display = {
-  '{bksp}': '⌫',
+  '{bksp}': 'del',
   '{enter}': 'return',
-  '{shift}': '⇧',
-  '{lock}': '⇪',
+  '{shift}': 'shift',
+  '{lock}': 'caps',
   '{space}': 'space',
   '{numbers}': '?123',
   '{symbols}': '#+=',
   '{default}': 'ABC',
-  '{hide}': '⌨'
+  '{hide}': 'hide'
 }
 
 function onKeyPress(button: string) {
   if (button === '{bksp}') {
     emit('update:modelValue', props.modelValue.slice(0, -1))
   } else if (button === '{enter}') {
+    // Submit/done - emit enter to trigger form submission
     emit('enter')
   } else if (button === '{space}') {
     emit('update:modelValue', props.modelValue + ' ')
@@ -154,6 +155,9 @@ onUnmounted(() => {
     <div
       v-if="visible"
       class="fixed bottom-0 left-0 right-0 z-[110] p-4 bg-[#1a1a1a]/95 backdrop-blur-sm border-t border-white/10"
+      @click.stop
+      @mousedown.stop
+      @touchstart.stop
     >
       <div class="max-w-[800px] mx-auto">
         <div ref="keyboardRef" class="keyboard-container" />

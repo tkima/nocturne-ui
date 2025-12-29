@@ -55,10 +55,15 @@ const passwordInput = ref('')
 const selectedNetwork = ref<{ ssid: string; flags: string } | null>(null)
 const showKeyboard = ref(false)
 
-// Forget device modal
+// Forget device modal (Bluetooth)
 const showForgetModal = ref(false)
 const deviceToForget = ref<{ address: string; name: string } | null>(null)
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
+
+// Forget WiFi network modal
+const showForgetWifiModal = ref(false)
+const wifiToForget = ref<{ ssid: string; networkId?: number } | null>(null)
+let wifiLongPressTimer: ReturnType<typeof setTimeout> | null = null
 
 // Animation classes
 const mainClasses = ref('translate-x-0 opacity-100')
@@ -152,8 +157,32 @@ function handleCancelPassword() {
   passwordInput.value = ''
 }
 
-function handleHideKeyboard() {
-  showKeyboard.value = false
+// Long press to forget WiFi network
+function handleWifiPressStart(network: { ssid: string; networkId?: number }) {
+  wifiLongPressTimer = setTimeout(() => {
+    wifiToForget.value = network
+    showForgetWifiModal.value = true
+  }, 800)
+}
+
+function handleWifiPressEnd() {
+  if (wifiLongPressTimer) {
+    clearTimeout(wifiLongPressTimer)
+    wifiLongPressTimer = null
+  }
+}
+
+async function handleForgetWifi() {
+  if (wifiToForget.value?.networkId === undefined) return
+
+  await wifi.forgetNetwork(wifiToForget.value.networkId)
+  showForgetWifiModal.value = false
+  wifiToForget.value = null
+}
+
+function handleCancelForgetWifi() {
+  showForgetWifiModal.value = false
+  wifiToForget.value = null
 }
 
 // ------------------------------------------------------------
@@ -394,7 +423,14 @@ onUnmounted(() => {
               <!-- Current Network -->
               <div v-if="wifi.currentNetwork.value" class="mb-6">
                 <h3 class="text-[28px] font-[560] text-white/60 mb-4">Current Network</h3>
-                <div class="p-4 bg-white/10 rounded-xl border border-white/10">
+                <div
+                  class="p-4 bg-white/10 rounded-xl border border-white/10 select-none"
+                  @mousedown="handleWifiPressStart({ ssid: wifi.currentNetwork.value.ssid, networkId: wifi.currentNetwork.value.networkId })"
+                  @mouseup="handleWifiPressEnd"
+                  @mouseleave="handleWifiPressEnd"
+                  @touchstart="handleWifiPressStart({ ssid: wifi.currentNetwork.value.ssid, networkId: wifi.currentNetwork.value.networkId })"
+                  @touchend="handleWifiPressEnd"
+                >
                   <div class="flex items-center justify-between">
                     <div class="flex items-center">
                       <WifiIcon class="w-6 h-6 text-white mr-4" />
@@ -424,11 +460,9 @@ onUnmounted(() => {
                           {{ network.ssid }}
                         </span>
                       </div>
-                      <div class="flex items-center space-x-2">
-                        <span v-if="wifi.hasPasswordSecurity(network.flags)" class="text-[18px] text-white/40">
-                          🔒
-                        </span>
-                      </div>
+                      <span v-if="wifi.hasPasswordSecurity(network.flags)" class="text-[18px] text-white/40">
+                        Secured
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -510,9 +544,8 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="showPasswordModal"
-        class="fixed inset-0 z-[100] flex items-start justify-center pt-8"
+        class="fixed inset-0 z-[100] flex items-start justify-center pt-8 bg-black/90"
       >
-        <div class="absolute inset-0 bg-black/90" @click="handleCancelPassword" />
         <div class="relative bg-[#1A1A1A] rounded-2xl p-6 w-full max-w-[600px] mx-4 shadow-lg border border-white/10">
           <h3 class="text-[28px] font-[580] text-white tracking-tight mb-6">
             Connect to {{ selectedNetwork?.ssid }}
@@ -547,15 +580,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Virtual Keyboard -->
-      <VirtualKeyboard
-        v-model="passwordInput"
-        :visible="showKeyboard && showPasswordModal"
-        @enter="handlePasswordSubmit"
-        @hide="handleHideKeyboard"
-      />
-
-      <!-- Forget Device Modal -->
+      <!-- Forget Device Modal (Bluetooth) -->
       <div
         v-if="showForgetModal"
         class="fixed inset-0 z-[100] flex items-center justify-center"
@@ -587,6 +612,49 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- Forget WiFi Network Modal -->
+      <div
+        v-if="showForgetWifiModal"
+        class="fixed inset-0 z-[100] flex items-center justify-center"
+      >
+        <div class="absolute inset-0 bg-black/60" @click="handleCancelForgetWifi" />
+        <div class="relative bg-[#161616] rounded-2xl pt-5 w-full max-w-md mx-4 overflow-hidden">
+          <div class="text-center px-6">
+            <h3 class="text-[36px] font-[560] text-white">
+              Forget Network?
+            </h3>
+            <p class="text-[28px] text-white/60 mt-2">
+              You will need to re-enter the password to connect again.
+            </p>
+          </div>
+
+          <div class="flex mt-5 border-t border-white/10">
+            <button
+              class="flex-1 py-4 text-[28px] font-[560] text-blue-400 hover:bg-white/5 focus:outline-none border-r border-white/10"
+              @click="handleCancelForgetWifi"
+            >
+              Cancel
+            </button>
+            <button
+              class="flex-1 py-4 text-[28px] font-[560] text-red-500 hover:bg-white/5 focus:outline-none"
+              @click="handleForgetWifi"
+            >
+              Forget
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Virtual Keyboard (separate Teleport to avoid backdrop interference) -->
+    <Teleport to="body">
+      <VirtualKeyboard
+        v-model="passwordInput"
+        :visible="showKeyboard && showPasswordModal"
+        @enter="handlePasswordSubmit"
+        @hide="showKeyboard = false"
+      />
     </Teleport>
 
     <!-- Connection Status Indicator -->
