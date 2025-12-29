@@ -11,10 +11,18 @@ export interface WiFiNetwork {
   networkId?: number
 }
 
+export interface NetworkStatus {
+  wpaState?: string
+  networkId?: number
+  ssid?: string
+  ipAddress?: string
+}
+
 export function useWiFiNetworks() {
   const currentNetwork = ref<WiFiNetwork | null>(null)
   const savedNetworks = ref<WiFiNetwork[]>([])
   const availableNetworks = ref<WiFiNetwork[]>([])
+  const networkStatus = ref<NetworkStatus | null>(null)
   const isLoading = ref(false)
   const isScanning = ref(false)
   const isConnecting = ref(false)
@@ -108,7 +116,36 @@ export function useWiFiNetworks() {
     }
   }
 
-  // Connect to a network
+  // Fetch current network status (wpaState, etc.)
+  async function fetchNetworkStatus(): Promise<NetworkStatus | null> {
+    try {
+      const response = await fetch(`${CONNECTOR_API}/network`)
+      if (!response.ok) return null
+
+      const status: NetworkStatus = await response.json()
+      networkStatus.value = status
+      return status
+    } catch {
+      return null
+    }
+  }
+
+  // Poll for connection status (like React version)
+  // Polls up to maxAttempts times, every interval ms
+  // Returns true when wpaState === "COMPLETED" or networkId is set
+  async function pollConnectionStatus(maxAttempts = 10, interval = 2000): Promise<boolean> {
+    for (let i = 0; i < maxAttempts; i++) {
+      const status = await fetchNetworkStatus()
+      console.log(`[WiFi] Poll attempt ${i + 1}/${maxAttempts}:`, status)
+      if (status && (status.wpaState === 'COMPLETED' || status.networkId)) {
+        return true
+      }
+      await new Promise(r => setTimeout(r, interval))
+    }
+    return false
+  }
+
+  // Connect to a network (matches React version logic)
   async function connectToNetwork(ssid: string, password?: string): Promise<boolean> {
     if (!isConnectorAvailable.value) return false
 
@@ -116,21 +153,70 @@ export function useWiFiNetworks() {
     error.value = null
 
     try {
-      const response = await fetch(`${CONNECTOR_API}/network/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ssid,
-          ...(password && { psk: password })
+      // First check if network is already saved
+      const savedResponse = await fetch(`${CONNECTOR_API}/network/list`)
+      if (!savedResponse.ok) throw new Error('Failed to check saved networks')
+
+      const savedList: WiFiNetwork[] = await savedResponse.json()
+      const existingSaved = savedList.find(n => n.ssid === ssid)
+
+      if (existingSaved && existingSaved.networkId !== undefined) {
+        // Network already saved, just select it
+        console.log('[WiFi] Network already saved, selecting:', existingSaved.networkId)
+        const selectResponse = await fetch(
+          `${CONNECTOR_API}/network/select/${existingSaved.networkId}`,
+          { method: 'POST' }
+        )
+        if (!selectResponse.ok) {
+          throw new Error(`Failed to select network: ${selectResponse.status}`)
+        }
+      } else {
+        // New network, connect with credentials
+        console.log('[WiFi] Connecting to new network:', ssid)
+        const connectResponse = await fetch(`${CONNECTOR_API}/network/connect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ssid,
+            ...(password && { psk: password })
+          })
         })
-      })
 
-      if (!response.ok) throw new Error('Connection failed')
+        if (!connectResponse.ok) {
+          throw new Error(`Failed to connect to network: ${connectResponse.status}`)
+        }
 
-      // Wait a bit then refresh
-      await new Promise(r => setTimeout(r, 2000))
+        // After connecting, fetch list again and select the newly saved network
+        try {
+          const listResp = await fetch(`${CONNECTOR_API}/network/list`)
+          if (listResp.ok) {
+            const listData: WiFiNetwork[] = await listResp.json()
+            const newlySaved = listData.find(n => n.ssid === ssid)
+            if (newlySaved && newlySaved.networkId !== undefined) {
+              console.log('[WiFi] Selecting newly saved network:', newlySaved.networkId)
+              await fetch(
+                `${CONNECTOR_API}/network/select/${newlySaved.networkId}`,
+                { method: 'POST' }
+              )
+            }
+          }
+        } catch (err) {
+          console.error('[WiFi] Failed to select newly added network:', err)
+        }
+      }
+
+      // Poll for connection status (up to 10 attempts, 2s each = 20s max)
+      console.log('[WiFi] Polling for connection status...')
+      const connected = await pollConnectionStatus()
+
+      if (!connected) {
+        await scanNetworks()
+        await fetchNetworkStatus()
+        throw new Error('Failed to establish connection to network')
+      }
+
+      // Connection successful, refresh saved networks
       await fetchSavedNetworks()
-
       return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Connection failed'
@@ -140,7 +226,7 @@ export function useWiFiNetworks() {
     }
   }
 
-  // Connect to a saved network by ID
+  // Connect to a saved network by ID (with polling like React version)
   async function connectToSavedNetwork(networkId: number): Promise<boolean> {
     if (!isConnectorAvailable.value) return false
 
@@ -152,11 +238,19 @@ export function useWiFiNetworks() {
         method: 'POST'
       })
 
-      if (!response.ok) throw new Error('Failed to select network')
+      if (!response.ok) throw new Error(`Failed to select network: ${response.status}`)
 
-      await new Promise(r => setTimeout(r, 2000))
+      // Poll for connection status
+      console.log('[WiFi] Polling for saved network connection...')
+      const connected = await pollConnectionStatus()
+
+      if (!connected) {
+        await scanNetworks()
+        await fetchNetworkStatus()
+        throw new Error('Failed to establish connection to network')
+      }
+
       await fetchSavedNetworks()
-
       return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Connection failed'
@@ -208,6 +302,7 @@ export function useWiFiNetworks() {
     currentNetwork,
     savedNetworks,
     availableNetworks,
+    networkStatus,
     isLoading,
     isScanning,
     isConnecting,
@@ -218,6 +313,7 @@ export function useWiFiNetworks() {
     connectToSavedNetwork,
     forgetNetwork,
     hasPasswordSecurity,
+    fetchNetworkStatus,
     refresh: scanNetworks
   }
 }

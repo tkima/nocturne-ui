@@ -2,7 +2,7 @@
      Virtual Keyboard - On-screen keyboard for touchscreen input
      ============================================================ -->
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import Keyboard from 'simple-keyboard'
 import 'simple-keyboard/build/css/index.css'
 
@@ -63,10 +63,12 @@ const display = {
 }
 
 function onKeyPress(button: string) {
+  console.log('[VirtualKeyboard] onKeyPress:', button)
   if (button === '{bksp}') {
     emit('update:modelValue', props.modelValue.slice(0, -1))
   } else if (button === '{enter}') {
     // Submit/done - emit enter to trigger form submission
+    console.log('[VirtualKeyboard] Emitting enter event')
     emit('enter')
   } else if (button === '{space}') {
     emit('update:modelValue', props.modelValue + ' ')
@@ -99,7 +101,12 @@ function onKeyPress(button: string) {
 }
 
 function initKeyboard() {
-  if (!keyboardRef.value) return
+  if (!keyboardRef.value) {
+    console.log('[VirtualKeyboard] initKeyboard: keyboardRef is null')
+    return
+  }
+
+  console.log('[VirtualKeyboard] initKeyboard: Creating keyboard instance')
 
   keyboard = new Keyboard(keyboardRef.value, {
     onChange: () => {},
@@ -113,6 +120,8 @@ function initKeyboard() {
       { class: 'hg-green', buttons: '{enter}' }
     ]
   })
+
+  console.log('[VirtualKeyboard] Keyboard instance created:', keyboard ? 'success' : 'failed')
 }
 
 function destroyKeyboard() {
@@ -122,12 +131,12 @@ function destroyKeyboard() {
   }
 }
 
-watch(() => props.visible, (visible) => {
+watch(() => props.visible, async (visible) => {
+  console.log('[VirtualKeyboard] Visibility changed:', visible)
   if (visible) {
-    // Small delay to ensure DOM is ready
-    setTimeout(() => {
-      initKeyboard()
-    }, 50)
+    // Use nextTick to ensure DOM is ready
+    await nextTick()
+    initKeyboard()
   } else {
     destroyKeyboard()
   }
@@ -139,8 +148,10 @@ watch(() => props.modelValue, (value) => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
+  console.log('[VirtualKeyboard] onMounted, visible:', props.visible)
   if (props.visible) {
+    await nextTick()
     initKeyboard()
   }
 })

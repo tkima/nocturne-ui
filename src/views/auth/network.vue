@@ -18,7 +18,8 @@ import {
   ChevronRightIcon,
   RefreshIcon
 } from '@/components/common/icons'
-import VirtualKeyboard from '@/components/common/VirtualKeyboard.vue'
+import Keyboard from 'simple-keyboard'
+import 'simple-keyboard/build/css/index.css'
 
 const router = useRouter()
 const uiStore = useUiStore()
@@ -54,6 +55,10 @@ const showPasswordModal = ref(false)
 const passwordInput = ref('')
 const selectedNetwork = ref<{ ssid: string; flags: string } | null>(null)
 const showKeyboard = ref(false)
+const keyboardRef = ref<HTMLDivElement | null>(null)
+let keyboard: Keyboard | null = null
+const layoutName = ref('default')
+const capsLock = ref(false)
 
 // Forget device modal (Bluetooth)
 const showForgetModal = ref(false)
@@ -121,6 +126,7 @@ function handleNetworkClick(network: { ssid: string; flags: string }) {
   if (wifi.hasPasswordSecurity(network.flags)) {
     selectedNetwork.value = network
     passwordInput.value = ''
+    passwordError.value = ''
     showPasswordModal.value = true
     // Show keyboard after modal animation
     setTimeout(() => {
@@ -131,10 +137,15 @@ function handleNetworkClick(network: { ssid: string; flags: string }) {
   }
 }
 
-async function handlePasswordSubmit() {
-  if (!selectedNetwork.value) return
+const passwordError = ref('')
 
+async function handlePasswordSubmit() {
+  if (!selectedNetwork.value || !passwordInput.value) return
+
+  passwordError.value = ''
   showKeyboard.value = false
+  destroyKeyboard()
+
   const success = await wifi.connectToNetwork(
     selectedNetwork.value.ssid,
     passwordInput.value
@@ -144,18 +155,136 @@ async function handlePasswordSubmit() {
     showPasswordModal.value = false
     selectedNetwork.value = null
     passwordInput.value = ''
+    // Trigger network check to detect internet connectivity
+    network.refresh()
   } else {
-    // Show keyboard again on failure
+    // Show error and keyboard again on failure
+    passwordError.value = wifi.error.value || 'Connection failed'
     showKeyboard.value = true
   }
 }
 
 function handleCancelPassword() {
   showKeyboard.value = false
+  destroyKeyboard()
   showPasswordModal.value = false
   selectedNetwork.value = null
   passwordInput.value = ''
 }
+
+// ------------------------------------------------------------
+// Keyboard Functions (inline like React version)
+// ------------------------------------------------------------
+const keyboardLayouts = {
+  default: [
+    'q w e r t y u i o p {bksp}',
+    'a s d f g h j k l ; {enter}',
+    '{shift} z x c v b n m , . {lock}',
+    '{numbers} {space} {numbers} {hide}'
+  ],
+  shift: [
+    'Q W E R T Y U I O P {bksp}',
+    'A S D F G H J K L : {enter}',
+    '{shift} Z X C V B N M < > {lock}',
+    '{numbers} {space} {numbers} {hide}'
+  ],
+  numbers: [
+    '1 2 3 4 5 6 7 8 9 0 {bksp}',
+    '- / : ; ( ) $ & @ " {enter}',
+    "{symbols} . , ? ! ' + - = ' {lock}",
+    '{default} {space} {default} {hide}'
+  ],
+  symbols: [
+    '[ ] { } # % ^ * + = {bksp}',
+    '_ \\ | ~ < > € £ ¥ • {enter}',
+    '{numbers} ` ¿ ¡ § ° † ‡ … ≠ {lock}',
+    '{default} {space} {default} {hide}'
+  ]
+}
+
+const keyboardDisplay = {
+  '{bksp}': 'del',
+  '{enter}': 'return',
+  '{shift}': 'shift',
+  '{lock}': 'caps',
+  '{space}': 'space',
+  '{numbers}': '?123',
+  '{symbols}': '#+=',
+  '{default}': 'ABC',
+  '{hide}': 'hide'
+}
+
+function onKeyPress(button: string) {
+  if (button === '{bksp}') {
+    passwordInput.value = passwordInput.value.slice(0, -1)
+  } else if (button === '{enter}') {
+    // Submit - call handlePasswordSubmit directly
+    handlePasswordSubmit()
+  } else if (button === '{space}') {
+    passwordInput.value = passwordInput.value + ' '
+  } else if (button === '{shift}') {
+    layoutName.value = layoutName.value === 'default' ? 'shift' : 'default'
+    keyboard?.setOptions({ layoutName: layoutName.value })
+  } else if (button === '{lock}') {
+    capsLock.value = !capsLock.value
+    layoutName.value = capsLock.value ? 'shift' : 'default'
+    keyboard?.setOptions({ layoutName: layoutName.value })
+  } else if (button === '{numbers}') {
+    layoutName.value = 'numbers'
+    keyboard?.setOptions({ layoutName: 'numbers' })
+  } else if (button === '{symbols}') {
+    layoutName.value = 'symbols'
+    keyboard?.setOptions({ layoutName: 'symbols' })
+  } else if (button === '{default}') {
+    layoutName.value = 'default'
+    keyboard?.setOptions({ layoutName: 'default' })
+  } else if (button === '{hide}') {
+    showKeyboard.value = false
+  } else {
+    passwordInput.value = passwordInput.value + button
+    // Auto-unshift after typing (unless caps lock)
+    if (layoutName.value === 'shift' && !capsLock.value) {
+      layoutName.value = 'default'
+      keyboard?.setOptions({ layoutName: 'default' })
+    }
+  }
+}
+
+function initKeyboard() {
+  if (!keyboardRef.value || keyboard) return
+
+  keyboard = new Keyboard(keyboardRef.value, {
+    onChange: () => {},
+    onKeyPress,
+    layout: keyboardLayouts,
+    display: keyboardDisplay,
+    layoutName: layoutName.value,
+    theme: 'hg-theme-default nocturne-keyboard',
+    buttonTheme: [
+      { class: 'hg-red', buttons: '{bksp}' },
+      { class: 'hg-green', buttons: '{enter}' }
+    ]
+  })
+}
+
+function destroyKeyboard() {
+  if (keyboard) {
+    keyboard.destroy()
+    keyboard = null
+  }
+}
+
+// Watch keyboard visibility
+watch(showKeyboard, (visible) => {
+  if (visible) {
+    // Wait for DOM then init
+    setTimeout(() => {
+      initKeyboard()
+    }, 50)
+  } else {
+    destroyKeyboard()
+  }
+})
 
 // Long press to forget WiFi network
 function handleWifiPressStart(network: { ssid: string; networkId?: number }) {
@@ -554,11 +683,15 @@ onUnmounted(() => {
           <input
             v-model="passwordInput"
             type="text"
-            class="w-full bg-white/10 rounded-xl px-6 py-4 text-[24px] text-white placeholder-white/40 border border-white/10 mb-6 focus:outline-none"
+            class="w-full bg-white/10 rounded-xl px-6 py-4 text-[24px] text-white placeholder-white/40 border border-white/10 mb-4 focus:outline-none"
             placeholder="Password"
             @focus="showKeyboard = true"
             @keyup.enter="handlePasswordSubmit"
           />
+
+          <div v-if="passwordError" class="text-red-400 text-[20px] mb-4">
+            {{ passwordError }}
+          </div>
 
           <div class="flex justify-end gap-4">
             <button
@@ -647,14 +780,21 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
-    <!-- Virtual Keyboard (separate Teleport to avoid backdrop interference) -->
+    <!-- Inline Virtual Keyboard -->
     <Teleport to="body">
-      <VirtualKeyboard
-        v-model="passwordInput"
-        :visible="showKeyboard && showPasswordModal"
-        @enter="handlePasswordSubmit"
-        @hide="showKeyboard = false"
-      />
+      <Transition name="slide-up">
+        <div
+          v-if="showKeyboard && showPasswordModal"
+          class="fixed bottom-0 left-0 right-0 z-[110] p-4 bg-[#1a1a1a]/95 backdrop-blur-sm border-t border-white/10"
+          @click.stop
+          @mousedown.stop
+          @touchstart.stop
+        >
+          <div class="max-w-[800px] mx-auto">
+            <div ref="keyboardRef" class="keyboard-container" />
+          </div>
+        </div>
+      </Transition>
     </Teleport>
 
     <!-- Connection Status Indicator -->
@@ -669,3 +809,59 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style>
+/* Nocturne keyboard theme */
+.nocturne-keyboard {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.nocturne-keyboard .hg-row {
+  margin-bottom: 8px !important;
+}
+
+.nocturne-keyboard .hg-button {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  color: white !important;
+  font-size: 20px !important;
+  font-weight: 500 !important;
+  height: 50px !important;
+  min-width: 40px !important;
+}
+
+.nocturne-keyboard .hg-button:active {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.nocturne-keyboard .hg-button.hg-red {
+  background: rgba(239, 68, 68, 0.3) !important;
+  color: #fca5a5 !important;
+}
+
+.nocturne-keyboard .hg-button.hg-green {
+  background: rgba(34, 197, 94, 0.3) !important;
+  color: #86efac !important;
+}
+
+.nocturne-keyboard .hg-button.hg-standardBtn[data-skbtn="{space}"] {
+  min-width: 200px !important;
+}
+
+.nocturne-keyboard .hg-button.hg-standardBtn[data-skbtn="{enter}"] {
+  min-width: 80px !important;
+}
+
+/* Slide up animation */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.2s ease-out;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+}
+</style>
