@@ -1,0 +1,301 @@
+# Nocturne Vue
+
+Vue 3 + TypeScript + Pinia rewrite of the Nocturne Spotify player UI for Car Thing devices.
+
+## Project Overview
+
+This is a complete rewrite of `nocturne-ui` (React) in Vue 3 with:
+- **Vue 3** with Composition API (`<script setup>`)
+- **TypeScript** for type safety
+- **Pinia** for state management
+- **Vue Router** for navigation
+- **Tailwind CSS** (exact same CSS as React version)
+
+## Target Device
+
+- **Spotify Car Thing** running custom firmware
+- **Chrome 64** browser (requires legacy polyfills)
+- **800x480** fixed resolution display
+- **Physical buttons**: 1-4 presets, M (menu/lock), Back, Dial (knob)
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Development server (port 7777)
+npm run dev
+
+# Build for production
+npm run build
+
+# Type check
+npx vue-tsc --noEmit
+```
+
+## Deployment to Device
+
+```bash
+# Build and deploy to Car Thing
+npm run build
+ssh root@172.16.42.2 "mount -o remount,rw /"
+scp -r dist/* root@172.16.42.2:/usr/share/nocturne-ui/
+ssh root@172.16.42.2 "mount -o remount,ro / && sv restart chromium"
+```
+
+**Device IPs:**
+- Host PC: `172.16.42.1`
+- Car Thing: `172.16.42.2`
+
+## Directory Structure
+
+```
+nocturne-vue/src/
+├── App.vue                 # Root component with sidebar, power menu, M button handling
+├── main.ts                 # Entry point with Pinia + Router
+├── index.css               # Tailwind + custom styles (EXACT copy from React)
+│
+├── components/
+│   ├── auth/
+│   │   └── QRCodeDisplay.vue    # QR code for Spotify PKCE auth
+│   ├── common/
+│   │   ├── icons/               # SVG icon components (NocturneIcon, WifiIcon, etc.)
+│   │   ├── GradientBackground.vue
+│   │   ├── LoadingScreen.vue
+│   │   ├── PowerMenuOverlay.vue # Shutdown/Reboot/Brightness controls
+│   │   ├── ScrollingText.vue
+│   │   └── ButtonMappingOverlay.vue
+│   ├── content/
+│   │   ├── MediaCard.vue        # Reusable album/playlist/artist card
+│   │   └── HorizontalScroll.vue # Scrollable row with keyboard nav
+│   ├── layout/
+│   │   └── Sidebar.vue          # Navigation sidebar
+│   └── player/
+│       └── ProgressBar.vue      # Playback progress with seek
+│
+├── views/
+│   ├── recents/index.vue        # Recently played albums
+│   ├── library/index.vue        # User playlists + liked songs
+│   ├── artists/index.vue        # Top artists
+│   ├── radio/index.vue          # Featured playlists (was DJ mixes)
+│   ├── podcasts/index.vue       # User's shows
+│   ├── settings/index.vue       # App settings, logout
+│   ├── now-playing/index.vue    # Full-screen player with controls
+│   ├── lock/index.vue           # Black screen (M button short press)
+│   ├── auth/
+│   │   ├── login.vue            # QR code auth screen
+│   │   ├── callback.vue         # OAuth callback handler
+│   │   └── network.vue          # WiFi/Bluetooth settings
+│   ├── album/index.vue          # Album detail with track list
+│   ├── artist/index.vue         # Artist detail
+│   └── show/index.vue           # Podcast show detail
+│
+├── stores/
+│   ├── auth.ts                  # PKCE OAuth, token management
+│   ├── spotify.ts               # Spotify API calls, playback state
+│   ├── ui.ts                    # UI state (activeSection, gradients)
+│   └── config.ts                # Environment detection, feature flags
+│
+├── composables/
+│   ├── useBluetooth.ts          # Bluetooth device management with auto-reconnect
+│   ├── useWiFiNetworks.ts       # WiFi scanning/connecting via Connector API
+│   ├── useButtonMapping.ts      # Preset button (1-4) long-press mapping
+│   └── useButtonAction.ts       # Button press/release handlers
+│
+├── router/
+│   └── index.ts                 # Vue Router routes
+│
+└── types/
+    ├── index.ts                 # Type exports
+    └── spotify.types.ts         # Spotify API types
+```
+
+## Key Features
+
+### Authentication
+- **PKCE OAuth flow** with device code (QR code scan)
+- Tokens stored in localStorage
+- Auto-refresh before expiry
+
+### Playback
+- Real-time playback state polling
+- Play/Pause, Skip, Previous, Shuffle, Repeat
+- Dial seek (knob rotation = ±10s seek)
+- Progress bar with touch/click seek
+
+### Button Mapping (Presets 1-4)
+- **Short press**: Play mapped content
+- **Long press (2s)**: Save current playing context to button
+- Stored in localStorage (`button1Id`, `button1Type`, etc.)
+
+### Power Menu (M Button)
+- **Short press**: Toggle lock screen (black display)
+- **Long press (600ms)**: Show power menu
+  - Shutdown / Reboot buttons
+  - Brightness slider (1-220)
+  - Auto-brightness toggle
+
+### Network Settings
+- **WiFi**: Requires Nocturne Connector on Raspberry Pi (`172.16.42.1:20574`)
+  - Scan networks, connect with password, forget networks
+- **Bluetooth**: Via nocturned daemon (`localhost:5000`)
+  - Auto-reconnect every 2 seconds (infinite retry)
+  - Show network screen after 5 seconds of no connection
+  - Long press (800ms) to forget device
+
+## Stores
+
+### `useAuthStore` (auth.ts)
+```typescript
+// State
+isAuthenticated: boolean
+accessToken: string | null
+refreshToken: string | null
+expiresAt: number | null
+
+// Actions
+startPkceAuth()      // Start OAuth flow
+handleCallback(code) // Exchange code for tokens
+refreshAccessToken() // Refresh expired token
+logout()             // Clear tokens
+```
+
+### `useSpotifyStore` (spotify.ts)
+```typescript
+// State
+currentPlayback: SpotifyPlayback | null
+recentlyPlayed: Album[]
+topArtists: Artist[]
+userPlaylists: Playlist[]
+savedTracks: Track[]
+userShows: Show[]
+
+// Actions
+fetchCurrentPlayback()
+play(options: { context_uri?: string; uris?: string[] })
+pause()
+skipNext()
+skipPrevious()
+toggleShuffle()
+cycleRepeat()
+seek(position_ms: number)
+getAlbum(id: string)
+getArtist(id: string)
+// ... etc
+```
+
+### `useConfigStore` (config.ts)
+```typescript
+// Computed
+isDev: boolean           // import.meta.env.DEV
+isProd: boolean          // import.meta.env.PROD
+isDevice: boolean        // Running on Car Thing (localhost:80)
+isWeb: boolean           // Running in browser
+nocturnedUrl: string     // 'http://localhost:5000'
+redirectUri: string      // OAuth redirect URI
+```
+
+### `useUiStore` (ui.ts)
+```typescript
+// State
+activeSection: string    // Current route for sidebar highlight
+gradientColors: string[] // Background gradient colors
+
+// Actions
+setActiveSection(section)
+setGradientColors(colors)
+```
+
+## Composables
+
+### `useBluetooth()`
+```typescript
+// State
+devices: BluetoothDevice[]
+isConnecting: boolean
+isReconnecting: boolean
+reconnectAttempt: number
+shouldShowNetworkScreen: boolean  // True after 5s of no connection
+
+// Actions
+connectDevice(address)
+disconnectDevice(address)
+forgetDevice(address)
+attemptReconnect()    // Auto-runs every 2s
+stopReconnecting()
+```
+
+### `useWiFiNetworks()`
+```typescript
+// State
+currentNetwork: WiFiNetwork | null
+availableNetworks: WiFiNetwork[]
+savedNetworks: WiFiNetwork[]
+isConnectorAvailable: boolean
+
+// Actions
+scanNetworks()
+connectToNetwork(ssid, password?)
+forgetNetwork(networkId)
+hasPasswordSecurity(flags): boolean
+```
+
+## Environment Variables
+
+```bash
+# .env.local (development)
+VITE_SPOTIFY_CLIENT_ID=your_client_id
+
+# .env.production (device deployment)
+VITE_SPOTIFY_CLIENT_ID=your_client_id
+VITE_REDIRECT_URI=https://yourdomain.com/spotify.php
+```
+
+## API Endpoints
+
+### Nocturned (localhost:5000)
+- `GET /bluetooth/devices` - List paired devices
+- `POST /bluetooth/connect/:address` - Connect to device
+- `POST /bluetooth/disconnect/:address` - Disconnect device
+- `POST /bluetooth/remove/:address` - Forget/unpair device
+- `POST /bluetooth/discover/on` - Start discovery
+- `POST /bluetooth/discover/off` - Stop discovery
+- `GET /device/brightness` - Get brightness state
+- `POST /device/brightness/:value` - Set brightness (1-220)
+- `POST /device/brightness/auto` - Toggle auto-brightness
+- `POST /device/power/shutdown` - Shutdown device
+- `POST /device/power/reboot` - Reboot device
+
+### Connector API (172.16.42.1:20574)
+- `GET /network` - Network status
+- `GET /network/scan` - Scan WiFi networks
+- `GET /network/list` - List saved networks
+- `POST /network/connect` - Connect to network
+- `POST /network/select/:id` - Select saved network
+- `DELETE /network/remove/:id` - Forget network
+
+## Build Configuration
+
+### Vite Config (`vite.config.ts`)
+- **Legacy plugin** for Chrome 64 polyfills
+- Port 7777 for dev server
+- `@` alias for `src/`
+
+### TypeScript
+- Strict mode enabled
+- Path aliases configured
+
+## Known Differences from React Version
+
+1. **No WebSocket** for real-time network updates (polls on mount only)
+2. **Simpler reconnection** - just retries every 2s vs complex backoff
+3. **Vue reactivity** - uses `ref()` instead of `useState()`
+4. **Pinia** instead of React Context for global state
+
+## Development Notes
+
+- Always use `<script setup lang="ts">` for components
+- Use Pinia stores for shared state, composables for reusable logic
+- Icons are simple Vue components with `currentColor` for styling
+- All CSS classes match React version exactly for visual parity
