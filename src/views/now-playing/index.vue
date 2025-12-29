@@ -278,27 +278,21 @@ function startPlaybackPolling() {
   const poll = async () => {
     if (!authStore.isAuthenticated) return
 
-    const wasPlaying = isPlaying.value
-    const hadPlayback = !!playback.value?.item
-
     await spotifyStore.fetchCurrentPlayback()
 
-    // Sync progress when playback state changes or periodically
+    // Always sync progress from server to prevent drift
     if (playback.value) {
-      // Update progress from server if we weren't playing before, or every poll
-      if (!wasPlaying || !hadPlayback) {
-        playbackProgress.value = playback.value.progress_ms || 0
-      }
+      playbackProgress.value = playback.value.progress_ms || 0
     }
   }
 
   // Initial poll
   poll()
 
-  // Set up interval - poll more frequently when nothing is playing
+  // Set up interval - sync every 15s when playing to prevent timer drift
   playbackPollInterval = setInterval(() => {
     poll()
-  }, isPlaying.value ? 30000 : 5000) // 30s when playing, 5s when idle
+  }, isPlaying.value ? 15000 : 5000) // 15s when playing, 5s when idle
 }
 
 function stopPlaybackPolling() {
