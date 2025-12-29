@@ -11,6 +11,7 @@
   "dependencies": {
     "pinia": "^3.0.4",
     "qrcode.vue": "^3.6.0",
+    "simple-keyboard": "^3.8.93",
     "vue": "^3.5.24",
     "vue-router": "^4.6.4"
   },

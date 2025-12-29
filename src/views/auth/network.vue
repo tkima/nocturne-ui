@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   RefreshIcon
 } from '@/components/common/icons'
+import VirtualKeyboard from '@/components/common/VirtualKeyboard.vue'
 
 const router = useRouter()
 const uiStore = useUiStore()
@@ -52,6 +53,7 @@ const isAnimating = ref(false)
 const showPasswordModal = ref(false)
 const passwordInput = ref('')
 const selectedNetwork = ref<{ ssid: string; flags: string } | null>(null)
+const showKeyboard = ref(false)
 
 // Forget device modal
 const showForgetModal = ref(false)
@@ -115,6 +117,10 @@ function handleNetworkClick(network: { ssid: string; flags: string }) {
     selectedNetwork.value = network
     passwordInput.value = ''
     showPasswordModal.value = true
+    // Show keyboard after modal animation
+    setTimeout(() => {
+      showKeyboard.value = true
+    }, 100)
   } else {
     wifi.connectToNetwork(network.ssid)
   }
@@ -123,6 +129,7 @@ function handleNetworkClick(network: { ssid: string; flags: string }) {
 async function handlePasswordSubmit() {
   if (!selectedNetwork.value) return
 
+  showKeyboard.value = false
   const success = await wifi.connectToNetwork(
     selectedNetwork.value.ssid,
     passwordInput.value
@@ -132,13 +139,21 @@ async function handlePasswordSubmit() {
     showPasswordModal.value = false
     selectedNetwork.value = null
     passwordInput.value = ''
+  } else {
+    // Show keyboard again on failure
+    showKeyboard.value = true
   }
 }
 
 function handleCancelPassword() {
+  showKeyboard.value = false
   showPasswordModal.value = false
   selectedNetwork.value = null
   passwordInput.value = ''
+}
+
+function handleHideKeyboard() {
+  showKeyboard.value = false
 }
 
 // ------------------------------------------------------------
@@ -495,42 +510,50 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="showPasswordModal"
-        class="fixed inset-0 z-[100] flex items-center justify-center"
+        class="fixed inset-0 z-[100] flex items-start justify-center pt-8"
       >
-        <div class="absolute inset-0 bg-black/60" @click="handleCancelPassword" />
-        <div class="relative bg-[#161616] rounded-2xl p-6 w-full max-w-md mx-4">
-          <h3 class="text-[32px] font-[560] text-white text-center mb-2">
-            Enter Password
+        <div class="absolute inset-0 bg-black/90" @click="handleCancelPassword" />
+        <div class="relative bg-[#1A1A1A] rounded-2xl p-6 w-full max-w-[600px] mx-4 shadow-lg border border-white/10">
+          <h3 class="text-[28px] font-[580] text-white tracking-tight mb-6">
+            Connect to {{ selectedNetwork?.ssid }}
           </h3>
-          <p class="text-[24px] text-white/60 text-center mb-6">
-            {{ selectedNetwork?.ssid }}
-          </p>
 
           <input
             v-model="passwordInput"
-            type="password"
-            class="w-full p-4 bg-white/10 border border-white/20 rounded-xl text-white text-[24px] focus:outline-none focus:border-white/40"
+            type="text"
+            class="w-full bg-white/10 rounded-xl px-6 py-4 text-[24px] text-white placeholder-white/40 border border-white/10 mb-6 focus:outline-none"
             placeholder="Password"
+            @focus="showKeyboard = true"
             @keyup.enter="handlePasswordSubmit"
           />
 
-          <div class="flex mt-6 border-t border-white/10 -mx-6 -mb-6">
+          <div class="flex justify-end gap-4">
             <button
-              class="flex-1 py-4 text-[28px] font-[560] text-blue-400 hover:bg-white/5 rounded-bl-2xl focus:outline-none"
+              type="button"
+              class="px-6 py-3 text-[24px] font-[560] text-white/60 hover:text-white transition-colors bg-transparent"
               @click="handleCancelPassword"
             >
               Cancel
             </button>
             <button
-              class="flex-1 py-4 text-[28px] font-[560] text-white hover:bg-white/5 rounded-br-2xl focus:outline-none border-l border-white/10"
-              :disabled="wifi.isConnecting.value"
+              type="button"
+              class="bg-white/10 hover:bg-white/20 transition-colors rounded-xl px-6 py-3 text-[24px] font-[560] text-white disabled:opacity-50"
+              :disabled="wifi.isConnecting.value || !passwordInput"
               @click="handlePasswordSubmit"
             >
-              {{ wifi.isConnecting.value ? 'Connecting...' : 'Join' }}
+              {{ wifi.isConnecting.value ? 'Connecting...' : 'Connect' }}
             </button>
           </div>
         </div>
       </div>
+
+      <!-- Virtual Keyboard -->
+      <VirtualKeyboard
+        v-model="passwordInput"
+        :visible="showKeyboard && showPasswordModal"
+        @enter="handlePasswordSubmit"
+        @hide="handleHideKeyboard"
+      />
 
       <!-- Forget Device Modal -->
       <div
