@@ -1,19 +1,35 @@
-# Nocturne Vue
+# Nocturne UI (Vue Edition)
 
-Vue 3 + TypeScript + Pinia rewrite of the Nocturne Spotify player UI for Car Thing devices.
+**A modern Vue 3 rewrite of the Nocturne Spotify player for Spotify Car Thing devices.**
 
-## Project Overview
+> 🎵 Full-featured Spotify controller for jailbroken Car Thing devices with a beautiful, responsive UI.
 
-This is a complete rewrite of `nocturne-ui` (React) in Vue 3 with:
+[![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vue.js)](https://vuejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.x-06B6D4?logo=tailwindcss)](https://tailwindcss.com/)
+
+## What is this?
+
+This is a complete rewrite of the original React-based Nocturne UI in **Vue 3** with:
 - **Vue 3** with Composition API (`<script setup>`)
 - **TypeScript** for type safety
 - **Pinia** for state management
 - **Vue Router** for navigation
 - **Tailwind CSS** (exact same CSS as React version)
 
+## Features
+
+- 🎵 **Full Spotify Control** - Play/pause, skip, shuffle, repeat, seek
+- 📻 **Browse Library** - Recently played, playlists, artists, podcasts
+- 🎛️ **Preset Buttons** - Map albums/playlists to physical buttons (1-4)
+- 📱 **WiFi & Bluetooth** - Connect via WiFi or iPhone Bluetooth tethering
+- 🔐 **QR Code Auth** - Easy Spotify login via QR code scan
+- 💾 **Persistent Settings** - Survives reboots (tokens, button mappings)
+- 🌙 **Power Menu** - Shutdown, reboot, brightness control
+
 ## Target Device
 
-- **Spotify Car Thing** running custom firmware
+- **Spotify Car Thing** running custom firmware (e.g., [superbird-tool](https://github.com/bishopdynamics/superbird-tool))
 - **Chrome 64** browser (requires legacy polyfills)
 - **800x480** fixed resolution display
 - **Physical buttons**: 1-4 presets, M (menu/lock), Back, Dial (knob)
