@@ -26,7 +26,7 @@ This will install:
 - Network connectivity via Raspberry Pi or iPhone Bluetooth tethering
 - The original React-based UI
 
-### Step 2: Install Vue Edition (Optional)
+### Step 2: Install Vue Edition
 
 This Vue edition is a **drop-in replacement** for the React UI. After flashing, you can replace it:
 
@@ -49,7 +49,7 @@ The deploy script replaces the UI at `/etc/nocturne/ui/` while preserving your a
 
 ## What is this?
 
-This is a complete rewrite of the original React-based Nocturne UI in **Vue 3** with:
+This is a complete and stable rewrite of the original React-based Nocturne UI in **Vue 3** with:
 - **Vue 3** with Composition API (`<script setup>`)
 - **TypeScript** for type safety
 - **Pinia** for state management
