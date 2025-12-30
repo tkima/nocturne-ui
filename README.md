@@ -37,12 +37,18 @@ npx vue-tsc --noEmit
 ## Deployment to Device
 
 ```bash
-# Build and deploy to Car Thing
-npm run build
-ssh root@172.16.42.2 "mount -o remount,rw / && rm -rf /etc/nocturne/ui/assets/*"
-scp -r dist/* root@172.16.42.2:/etc/nocturne/ui/
-ssh root@172.16.42.2 "mount -o remount,ro / && sv restart chromium"
+# Build and deploy to Car Thing (recommended)
+./sync-to-device.sh
+
+# Deploy only (skip build, use existing dist/)
+./sync-to-device.sh --skip-build
 ```
+
+The deploy script handles:
+- Building the project
+- Preserving `settings.json` across deploys
+- Clearing browser cache while keeping auth tokens
+- Making `save-settings.sh` executable
 
 **Device IPs:**
 - Host PC: `172.16.42.1`
@@ -149,8 +155,14 @@ nocturne-vue/src/
 
 ### Authentication
 - **PKCE OAuth flow** with device code (QR code scan)
-- Tokens stored in localStorage
+- Tokens stored in `settings.json` (file-based persistence survives reboots)
 - Auto-refresh before expiry
+
+### Settings Persistence
+- All settings stored in `/etc/nocturne/ui/settings.json` on device
+- Uses `save-settings.sh` script via nocturned `/device/exec` endpoint
+- In dev mode, falls back to localStorage
+- Settings include: auth tokens, button mappings, UI preferences
 
 ### Playback
 - Real-time playback state polling
