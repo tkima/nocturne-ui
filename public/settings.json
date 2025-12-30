@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "startWithNowPlaying": false,
+  "trackNameScrollingEnabled": true,
+  "songChangeGestureEnabled": true,
+  "elapsedTimeEnabled": false,
+  "dialSeekEnabled": true,
+  "use24HourTime": false,
+  "showStatusBar": true,
+  "accessToken": null,
+  "refreshToken": null,
+  "tokenExpiry": null,
+  "buttonMappings": [null, null, null, null],
+  "lastBluetoothDevice": null
+}
