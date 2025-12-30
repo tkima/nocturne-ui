@@ -15,7 +15,10 @@ Before using this UI, you need a **jailbroken Spotify Car Thing** with the Noctu
 ### Step 1: Flash Your Car Thing
 
 1. Download [nocturne_image_v3.0.0.zip](https://github.com/usenocturne/nocturne/releases/download/v3.0.0/nocturne_image_v3.0.0.zip) (or check [Releases](https://github.com/usenocturne/nocturne/releases) for newer versions)
-2. Flash your Car Thing using [Terbium](https://terbium.app)
+2. Plug in your Car Thing via USB while holding buttons **1+4** (top buttons)
+3. Follow the instructions on [Terbium](https://terbium.app) to flash using the downloaded zip
+
+Flashing takes about 10 minutes. If it's not working, try different USB ports (rear IO, USB 2.0, or BIOS flash port on AMD).
 
 This will install:
 - Custom Linux image for Car Thing
