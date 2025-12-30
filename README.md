@@ -14,7 +14,7 @@ Before using this UI, you need a **jailbroken Spotify Car Thing** with the Noctu
 
 ### Step 1: Flash Your Car Thing
 
-1. Download an installer zip from [Nocturne Releases](https://github.com/usenocturne/nocturne/releases)
+1. Download [nocturne_image_v3.0.0.zip](https://github.com/usenocturne/nocturne/releases/download/v3.0.0/nocturne_image_v3.0.0.zip) (or check [Releases](https://github.com/usenocturne/nocturne/releases) for newer versions)
 2. Flash your Car Thing using [Terbium](https://terbium.app)
 
 This will install:
