@@ -43,6 +43,8 @@ npm run build
 
 The deploy script replaces the UI at `/etc/nocturne/ui/` while preserving your auth tokens and settings.
 
+**Note:** No configuration needed! The app uses Spotify's Device Authorization flow by default - just scan the QR code to log in. See [Spotify Auth Relay](#spotify-auth-relay-optional) if you want to use your own Client ID.
+
 ## What is this?
 
 This is a complete rewrite of the original React-based Nocturne UI in **Vue 3** with:
