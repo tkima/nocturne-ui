@@ -12,18 +12,36 @@
 
 Before using this UI, you need a **jailbroken Spotify Car Thing** with the Nocturne firmware installed.
 
-### Getting Started with Car Thing
+### Step 1: Flash Your Car Thing
 
-1. **Flash your Car Thing** using [superbird-tool](https://github.com/bishopdynamics/superbird-tool)
-2. **Install the original Nocturne firmware** from [usenocturne/nocturne-image](https://github.com/usenocturne/nocturne-image)
-3. **Follow the setup guide** at [nocturne.quest](https://nocturne.quest/)
+Follow the flashing guide from the original Nocturne project:
 
-The original Nocturne project provides:
+**[Flashing Instructions](https://github.com/usenocturne/nocturne#flashing)**
+
+This will install:
 - Custom Linux image for Car Thing
 - The `nocturned` daemon for hardware control (buttons, brightness, Bluetooth)
 - Network connectivity via Raspberry Pi or iPhone Bluetooth tethering
+- The original React-based UI
 
-This Vue edition is a **drop-in replacement** for the React-based UI that comes with Nocturne.
+### Step 2: Install Vue Edition (Optional)
+
+This Vue edition is a **drop-in replacement** for the React UI. After flashing, you can replace it:
+
+```bash
+# Clone this repo
+git clone https://github.com/tkima/nocturne-ui.git
+cd nocturne-ui
+
+# Install dependencies and build
+npm install
+npm run build
+
+# Deploy to device (Car Thing must be connected via USB)
+./sync-to-device.sh
+```
+
+The deploy script replaces the UI at `/etc/nocturne/ui/` while preserving your auth tokens and settings.
 
 ## What is this?
 
