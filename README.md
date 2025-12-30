@@ -2,11 +2,28 @@
 
 **A modern Vue 3 rewrite of the Nocturne Spotify player for Spotify Car Thing devices.**
 
-> 🎵 Full-featured Spotify controller for jailbroken Car Thing devices with a beautiful, responsive UI.
+> Full-featured Spotify controller for jailbroken Car Thing devices with a beautiful, responsive UI.
 
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.x-06B6D4?logo=tailwindcss)](https://tailwindcss.com/)
+
+## Prerequisites
+
+Before using this UI, you need a **jailbroken Spotify Car Thing** with the Nocturne firmware installed.
+
+### Getting Started with Car Thing
+
+1. **Flash your Car Thing** using [superbird-tool](https://github.com/bishopdynamics/superbird-tool)
+2. **Install the original Nocturne firmware** from [usenocturne/nocturne-image](https://github.com/usenocturne/nocturne-image)
+3. **Follow the setup guide** at [nocturne.quest](https://nocturne.quest/)
+
+The original Nocturne project provides:
+- Custom Linux image for Car Thing
+- The `nocturned` daemon for hardware control (buttons, brightness, Bluetooth)
+- Network connectivity via Raspberry Pi or iPhone Bluetooth tethering
+
+This Vue edition is a **drop-in replacement** for the React-based UI that comes with Nocturne.
 
 ## What is this?
 
