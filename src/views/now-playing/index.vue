@@ -43,6 +43,9 @@ const wheelDeltaAccumulator = ref(0)
 const pendingSeekPosition = ref<number | null>(null)
 let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
+// Skip fetch debounce - resets on each skip so rapid skips don't trigger multiple fetches
+let skipFetchTimeout: ReturnType<typeof setTimeout> | null = null
+
 // Swipe gesture state
 const touchStartX = ref(0)
 const touchStartY = ref(0)
@@ -325,19 +328,37 @@ const handlePlayPause = createButtonHandler('Play/Pause', async () => {
   await spotifyStore.fetchCurrentPlayback()
 }, 300)
 
-const handleSkipNext = createButtonHandler('Skip Next', async () => {
+// Skip next - no throttle, debounced fetch (resets on each skip)
+async function handleSkipNext() {
+  logger.info('Skip Next')
   await spotifyStore.skipToNext()
-  await new Promise(r => setTimeout(r, 500))
-  await spotifyStore.fetchCurrentPlayback()
-  playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
-}, 1500)
 
-const handleSkipPrevious = createButtonHandler('Skip Previous', async () => {
+  // Clear any pending fetch and reset the timer
+  if (skipFetchTimeout) {
+    clearTimeout(skipFetchTimeout)
+  }
+  skipFetchTimeout = setTimeout(async () => {
+    await spotifyStore.fetchCurrentPlayback()
+    playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
+    skipFetchTimeout = null
+  }, 500)
+}
+
+// Skip previous - no throttle, debounced fetch (resets on each skip)
+async function handleSkipPrevious() {
+  logger.info('Skip Previous')
   await spotifyStore.skipToPrevious()
-  await new Promise(r => setTimeout(r, 500))
-  await spotifyStore.fetchCurrentPlayback()
-  playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
-}, 1500)
+
+  // Clear any pending fetch and reset the timer
+  if (skipFetchTimeout) {
+    clearTimeout(skipFetchTimeout)
+  }
+  skipFetchTimeout = setTimeout(async () => {
+    await spotifyStore.fetchCurrentPlayback()
+    playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
+    skipFetchTimeout = null
+  }, 500)
+}
 
 const handleToggleLike = createButtonHandler('Like', async () => {
   const trackId = playback.value?.item?.id
@@ -547,6 +568,9 @@ onUnmounted(() => {
   }
   if (errorDelayTimeout) {
     clearTimeout(errorDelayTimeout)
+  }
+  if (skipFetchTimeout) {
+    clearTimeout(skipFetchTimeout)
   }
   // Remove swipe listeners
   if (swipeAreaRef.value) {
