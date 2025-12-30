@@ -96,6 +96,11 @@ export function useNetwork() {
       const connected = await checkConnectivity()
       updateConnectionStatus(connected)
 
+      // Mark initial check done if not already (for manual refresh calls)
+      if (!initialCheckDone.value) {
+        initialCheckDone.value = true
+      }
+
       // If connected, stop polling. If not connected, keep polling.
       if (connected) {
         stopPolling()

@@ -123,9 +123,9 @@ function navigateBack() {
 // ------------------------------------------------------------
 // Wi-Fi Actions
 // ------------------------------------------------------------
-function handleNetworkClick(network: { ssid: string; flags: string }) {
-  if (wifi.hasPasswordSecurity(network.flags)) {
-    selectedNetwork.value = network
+async function handleNetworkClick(netw: { ssid: string; flags: string }) {
+  if (wifi.hasPasswordSecurity(netw.flags)) {
+    selectedNetwork.value = netw
     passwordInput.value = ''
     passwordError.value = ''
     showPasswordModal.value = true
@@ -134,7 +134,13 @@ function handleNetworkClick(network: { ssid: string; flags: string }) {
       showKeyboard.value = true
     }, 100)
   } else {
-    wifi.connectToNetwork(network.ssid)
+    // Open network - connect and trigger network check
+    const success = await wifi.connectToNetwork(netw.ssid)
+    if (success) {
+      setTimeout(async () => {
+        await network.refresh()
+      }, 1500)
+    }
   }
 }
 
@@ -157,7 +163,10 @@ async function handlePasswordSubmit() {
     selectedNetwork.value = null
     passwordInput.value = ''
     // Trigger network check to detect internet connectivity
-    network.refresh()
+    // Small delay to let WiFi connection fully establish before checking
+    setTimeout(async () => {
+      await network.refresh()
+    }, 1500)
   } else {
     // Show error and keyboard again on failure
     passwordError.value = wifi.error.value || 'Connection failed'
