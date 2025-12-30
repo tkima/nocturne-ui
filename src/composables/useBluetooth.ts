@@ -23,6 +23,7 @@ const RECONNECT_INTERVAL = 2000 // 2 seconds - keep trying forever
 const INITIAL_RECONNECT_DELAY = 1000
 const SHOW_NETWORK_SCREEN_DELAY = 5000 // Show network screen after 5 seconds of no connection
 const NETWORK_POLL_INTERVAL = 5000 // Poll network connection every 5 seconds
+const SOFT_START_DELAY = 5000 // Wait 5 seconds before starting Bluetooth (staggered after network)
 
 export function useBluetooth() {
   const config = useConfigStore()
@@ -43,6 +44,7 @@ export function useBluetooth() {
   let reconnectTimeoutRef: ReturnType<typeof setTimeout> | null = null
   let networkScreenTimeoutRef: ReturnType<typeof setTimeout> | null = null
   let networkPollIntervalRef: ReturnType<typeof setInterval> | null = null
+  let softStartTimeoutRef: ReturnType<typeof setTimeout> | null = null
   let ws: WebSocket | null = null
   let wsReconnectTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -555,10 +557,24 @@ export function useBluetooth() {
   }
 
   onMounted(() => {
-    init()
+    // Skip initialization entirely if Bluetooth is disabled
+    if (!BLUETOOTH_ENABLED) {
+      return
+    }
+
+    // Soft start: delay Bluetooth initialization to reduce startup load
+    // This is staggered after network check (3s) to spread out the load
+    softStartTimeoutRef = setTimeout(() => {
+      softStartTimeoutRef = null
+      init()
+    }, SOFT_START_DELAY)
   })
 
   onUnmounted(() => {
+    if (softStartTimeoutRef) {
+      clearTimeout(softStartTimeoutRef)
+      softStartTimeoutRef = null
+    }
     closeWebSocket()
     stopDiscovery()
     cleanupReconnectTimer()

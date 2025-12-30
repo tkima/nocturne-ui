@@ -9,14 +9,17 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 const NETWORK_CHECK_BYPASS_KEY = 'networkCheckBypass'
 const POLL_INTERVAL = 3000 // Poll every 3 seconds when not connected
+const SOFT_START_DELAY = 3000 // Wait 3 seconds before starting network checks
 
 // Singleton state - shared across all components
 const isConnected = ref<boolean | null>(null)
 const initialCheckDone = ref(false)
 const hasEverConnectedThisSession = ref(false)
 const isChecking = ref(false)
+const softStartComplete = ref(false)
 
 let pollIntervalId: ReturnType<typeof setInterval> | null = null
+let softStartTimeoutId: ReturnType<typeof setTimeout> | null = null
 let initialized = false
 let mountCount = 0
 
@@ -154,9 +157,14 @@ export function useNetwork() {
     // Only initialize once (first mount)
     if (!initialized) {
       initialized = true
-      performInitialCheck()
       window.addEventListener('online', handleOnline)
       window.addEventListener('offline', handleOffline)
+
+      // Soft start: delay initial network check to reduce startup load
+      softStartTimeoutId = setTimeout(() => {
+        softStartComplete.value = true
+        performInitialCheck()
+      }, SOFT_START_DELAY)
     }
   })
 
@@ -166,9 +174,14 @@ export function useNetwork() {
     // Only cleanup when all components using this composable are unmounted
     if (mountCount === 0) {
       stopPolling()
+      if (softStartTimeoutId) {
+        clearTimeout(softStartTimeoutId)
+        softStartTimeoutId = null
+      }
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       initialized = false
+      softStartComplete.value = false
     }
   })
 
