@@ -202,23 +202,6 @@ body {
   background-color: #000000;
 }
 
-/* Hide scrollbars on scrollable elements */
-html,
-body,
-[class*="overflow-y-auto"],
-[class*="overflow-x-auto"],
-[class*="overflow-auto"] {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-html::-webkit-scrollbar,
-body::-webkit-scrollbar,
-[class*="overflow-y-auto"]::-webkit-scrollbar,
-[class*="overflow-x-auto"]::-webkit-scrollbar,
-[class*="overflow-auto"]::-webkit-scrollbar {
-  display: none;
-}
-
 .album-shadow {
   box-shadow: 0px 40px 250px rgba(0, 0, 0, 0.25);
 }
