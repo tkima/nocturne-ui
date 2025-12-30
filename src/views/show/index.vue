@@ -2,11 +2,13 @@
      Show View - Shows podcast episodes in a list
      ============================================================ -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
+import { useListNavigation } from '@/composables/useListNavigation'
+import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
 
 // ------------------------------------------------------------
@@ -24,7 +26,15 @@ const uiStore = useUiStore()
 const show = ref<any>(null)
 const episodes = ref<any[]>([])
 const isLoading = ref(true)
-const selectedEpisodeIndex = ref(0)
+
+// ------------------------------------------------------------
+// List Navigation (shared composable)
+// ------------------------------------------------------------
+const { selectedIndex: selectedEpisodeIndex, setSelectedIndex } = useListNavigation(
+  episodes,
+  'data-episode-index',
+  (episode: any, index: number) => handleEpisodePlay(episode, index)
+)
 
 // ------------------------------------------------------------
 // Computed
@@ -92,45 +102,9 @@ async function handleEpisodePlay(episode: any, index: number) {
   // Play the episode
   await spotifyStore.play({ uris: [episode.uri] })
 
-  // Fetch updated playback state and navigate to Now Playing
-  setTimeout(async () => {
-    await spotifyStore.fetchCurrentPlayback()
-    router.push('/now-playing')
-  }, 500)
-}
-
-function handleBack() {
-  router.back()
-}
-
-function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    handleBack()
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    if (selectedEpisodeIndex.value > 0) {
-      selectedEpisodeIndex.value--
-      scrollToEpisode(selectedEpisodeIndex.value)
-    }
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    if (selectedEpisodeIndex.value < episodes.value.length - 1) {
-      selectedEpisodeIndex.value++
-      scrollToEpisode(selectedEpisodeIndex.value)
-    }
-  } else if (e.key === 'Enter') {
-    const episode = episodes.value[selectedEpisodeIndex.value]
-    if (episode) {
-      handleEpisodePlay(episode, selectedEpisodeIndex.value)
-    }
-  }
-}
-
-function scrollToEpisode(index: number) {
-  const element = document.querySelector(`[data-episode-index="${index}"]`)
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
+  // Navigate immediately, fetch in background
+  spotifyStore.fetchPlaybackDebounced()
+  router.push('/now-playing')
 }
 
 function formatDuration(ms: number): string {
@@ -152,8 +126,6 @@ function formatDate(dateString: string): string {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeyDown)
-
   authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await fetchShowData()
@@ -162,140 +134,52 @@ onMounted(async () => {
     // Find currently playing episode index
     const playingIndex = episodes.value.findIndex(e => e.uri === currentTrackUri.value)
     if (playingIndex >= 0) {
-      selectedEpisodeIndex.value = playingIndex
-      setTimeout(() => scrollToEpisode(playingIndex), 100)
+      setSelectedIndex(playingIndex)
     }
   }
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown)
 })
 
 // Watch for episode changes
 watch(currentTrackUri, (newUri) => {
   const playingIndex = episodes.value.findIndex(e => e.uri === newUri)
   if (playingIndex >= 0) {
-    selectedEpisodeIndex.value = playingIndex
+    setSelectedIndex(playingIndex, false)
   }
 })
 </script>
 
 <template>
-  <div class="h-screen w-full flex fadeIn-animation">
-    <!-- Loading -->
-    <div v-if="isLoading" class="flex items-center justify-center w-full">
-      <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-    </div>
-
-    <template v-else>
-      <!-- Left: Show Info (Sticky) -->
-      <div class="flex-shrink-0 p-12 flex flex-col">
-        <!-- Show Art -->
-        <img
-          v-if="showArt"
-          :src="showArt"
-          alt="Show Art"
-          class="object-cover rounded-[12px] drop-shadow-[0_8px_5px_rgba(0,0,0,0.25)]"
-          style="width: var(--album-art-size); height: var(--album-art-size)"
-        />
-        <div
-          v-else
-          class="bg-white/10 rounded-[12px] flex items-center justify-center"
-          style="width: var(--album-art-size); height: var(--album-art-size)"
-        >
-          <span class="text-white/40 text-xl">No Art</span>
-        </div>
-
-        <!-- Show Info -->
-        <div class="mt-6" style="max-width: var(--album-art-size)">
-          <h2 class="text-[32px] font-[580] text-white tracking-tight truncate">
-            {{ showName }}
-          </h2>
-          <p class="text-[24px] font-[560] text-white/60 tracking-tight truncate">
-            {{ publisherName }}
-          </p>
-        </div>
-      </div>
-
-      <!-- Right: Episode List (Scrollable) -->
-      <div class="flex-1 overflow-y-auto py-12 pr-12 scroll-container">
-        <div
-          v-for="(episode, index) in episodes"
-          :key="episode.id || index"
-          :data-episode-index="index"
-          class="flex items-start mb-6 cursor-pointer transition-transform duration-200 ease-out"
-          :class="selectedEpisodeIndex === index ? 'scale-105' : ''"
-          @click="handleEpisodePlay(episode, index)"
-        >
-          <!-- Episode Number or Playing Indicator -->
-          <div class="w-12 flex-shrink-0">
-            <div
-              v-if="episode.uri === currentTrackUri"
-              class="flex items-end gap-[2px] h-6"
-            >
-              <div class="w-1 bg-white animate-wave0 rounded-full" />
-              <div class="w-1 bg-white animate-wave1 rounded-full" />
-              <div class="w-1 bg-white animate-wave2 rounded-full" />
-              <div class="w-1 bg-white animate-wave3 rounded-full" />
-            </div>
-            <p v-else class="text-[28px] font-[560] text-white/40">
-              {{ index + 1 }}
-            </p>
-          </div>
-
-          <!-- Episode Info -->
-          <div class="flex-1 min-w-0">
-            <p class="text-[28px] font-[580] tracking-tight truncate text-white">
-              {{ episode.name }}
-            </p>
-            <p class="text-[20px] font-[560] text-white/60 tracking-tight truncate">
-              {{ formatDate(episode.release_date) }} · {{ formatDuration(episode.duration_ms) }}
-            </p>
-            <p
-              v-if="episode.description"
-              class="text-[18px] text-white/40 tracking-tight line-clamp-2 mt-1"
-            >
-              {{ episode.description }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </template>
+  <!-- Loading -->
+  <div v-if="isLoading" class="h-screen w-full flex items-center justify-center">
+    <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
   </div>
+
+  <MediaListView
+    v-else
+    :image="showArt"
+    :title="showName"
+    :subtitle="publisherName"
+    image-rounded="lg"
+    :items="episodes"
+    :selected-index="selectedEpisodeIndex"
+    :current-item-uri="currentTrackUri"
+    item-data-attribute="data-episode-index"
+    @item-click="handleEpisodePlay"
+  >
+    <template #item="{ item: episode }">
+      <p class="text-[28px] font-[580] tracking-tight truncate text-white">
+        {{ episode.name }}
+      </p>
+      <p class="text-[20px] font-[560] text-white/60 tracking-tight truncate">
+        {{ formatDate(episode.release_date) }} · {{ formatDuration(episode.duration_ms) }}
+      </p>
+      <p
+        v-if="episode.description"
+        class="text-[18px] text-white/40 tracking-tight line-clamp-2 mt-1"
+      >
+        {{ episode.description }}
+      </p>
+    </template>
+  </MediaListView>
 </template>
 
-<style scoped>
-/* Wave animation for currently playing episode */
-@keyframes wave {
-  0%, 100% { height: 4px; }
-  50% { height: 16px; }
-}
-
-.animate-wave0 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0s;
-}
-
-.animate-wave1 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.2s;
-}
-
-.animate-wave2 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.4s;
-}
-
-.animate-wave3 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.6s;
-}
-
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-</style>

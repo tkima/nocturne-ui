@@ -48,6 +48,7 @@ watch(
 // ------------------------------------------------------------
 type Screen = 'main' | 'network' | 'wifi' | 'bluetooth'
 const currentScreen = ref<Screen>('main')
+
 const isAnimating = ref(false)
 
 // Password modal
@@ -387,11 +388,11 @@ onUnmounted(() => {
     <div class="relative z-10 w-full h-full overflow-hidden">
       <!-- Main Screen -->
       <div
-        class="absolute top-0 left-0 w-full h-full transition-all duration-300 ease-out"
+        class="absolute top-0 left-0 w-full h-full transition-all duration-300 ease-out overflow-y-auto"
         :class="mainClasses"
         :style="{ visibility: currentScreen === 'main' || isAnimating ? 'visible' : 'hidden' }"
       >
-        <div class="w-full max-w-6xl px-6 mx-auto h-full flex items-center">
+        <div class="w-full max-w-6xl px-6 mx-auto min-h-full flex items-center py-8">
           <div class="grid grid-cols-2 gap-16 items-center w-full">
             <div class="flex flex-col items-start space-y-8 ml-12">
               <NocturneIcon class="h-12 w-auto" />

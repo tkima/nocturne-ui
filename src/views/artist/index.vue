@@ -2,11 +2,13 @@
      Artist View - Shows artist's top tracks
      ============================================================ -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
+import { useListNavigation } from '@/composables/useListNavigation'
+import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
 import type { Artist, Track } from '@/types'
 
@@ -25,7 +27,15 @@ const uiStore = useUiStore()
 const artist = ref<Artist | null>(null)
 const tracks = ref<Track[]>([])
 const isLoading = ref(true)
-const selectedTrackIndex = ref(0)
+
+// ------------------------------------------------------------
+// List Navigation (shared composable)
+// ------------------------------------------------------------
+const { selectedIndex: selectedTrackIndex, setSelectedIndex } = useListNavigation(
+  tracks,
+  'data-track-index',
+  (track: Track, index: number) => handleTrackPlay(track, index)
+)
 
 // ------------------------------------------------------------
 // Computed
@@ -100,53 +110,15 @@ async function handleTrackPlay(track: Track, index: number) {
     offset: { position: index }
   })
 
-  // Fetch updated playback state
-  setTimeout(async () => {
-    await spotifyStore.fetchCurrentPlayback()
-    router.push('/now-playing')
-  }, 500)
-}
-
-function handleBack() {
-  router.back()
-}
-
-function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    handleBack()
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    if (selectedTrackIndex.value > 0) {
-      selectedTrackIndex.value--
-      scrollToTrack(selectedTrackIndex.value)
-    }
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    if (selectedTrackIndex.value < tracks.value.length - 1) {
-      selectedTrackIndex.value++
-      scrollToTrack(selectedTrackIndex.value)
-    }
-  } else if (e.key === 'Enter') {
-    const track = tracks.value[selectedTrackIndex.value]
-    if (track) {
-      handleTrackPlay(track, selectedTrackIndex.value)
-    }
-  }
-}
-
-function scrollToTrack(index: number) {
-  const element = document.querySelector(`[data-track-index="${index}"]`)
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
+  // Navigate immediately, fetch in background
+  spotifyStore.fetchPlaybackDebounced()
+  router.push('/now-playing')
 }
 
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeyDown)
-
   authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await fetchArtistData()
@@ -155,127 +127,46 @@ onMounted(async () => {
     // Find currently playing track index
     const playingIndex = tracks.value.findIndex(t => t.uri === currentTrackUri.value)
     if (playingIndex >= 0) {
-      selectedTrackIndex.value = playingIndex
-      setTimeout(() => scrollToTrack(playingIndex), 100)
+      setSelectedIndex(playingIndex)
     }
   }
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown)
 })
 
 // Watch for track changes
 watch(currentTrackUri, (newUri) => {
   const playingIndex = tracks.value.findIndex(t => t.uri === newUri)
   if (playingIndex >= 0) {
-    selectedTrackIndex.value = playingIndex
+    setSelectedIndex(playingIndex, false)
   }
 })
 </script>
 
 <template>
-  <div class="h-screen w-full flex fadeIn-animation">
-    <!-- Loading -->
-    <div v-if="isLoading" class="flex items-center justify-center w-full">
-      <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-    </div>
-
-    <template v-else>
-      <!-- Left: Artist Info (Sticky) -->
-      <div class="flex-shrink-0 p-12 flex flex-col">
-        <!-- Artist Image -->
-        <img
-          v-if="artistImage"
-          :src="artistImage"
-          alt="Artist"
-          class="object-cover rounded-full drop-shadow-[0_8px_5px_rgba(0,0,0,0.25)]"
-          style="width: var(--album-art-size); height: var(--album-art-size)"
-        />
-        <div
-          v-else
-          class="bg-white/10 rounded-full flex items-center justify-center"
-          style="width: var(--album-art-size); height: var(--album-art-size)"
-        >
-          <span class="text-white/40 text-xl">No Image</span>
-        </div>
-
-        <!-- Artist Info -->
-        <div class="mt-6 text-center" style="max-width: var(--album-art-size)">
-          <h2 class="text-[32px] font-[580] text-white tracking-tight truncate">
-            {{ artistName }}
-          </h2>
-          <p class="text-[24px] font-[560] text-white/60 tracking-tight">
-            {{ followerCount }}
-          </p>
-        </div>
-      </div>
-
-      <!-- Right: Top Tracks List (Scrollable) -->
-      <div class="flex-1 overflow-y-auto py-12 pr-12 scroll-container">
-        <div
-          v-for="(track, index) in tracks"
-          :key="track.id || index"
-          :data-track-index="index"
-          class="flex items-center mb-4 cursor-pointer transition-transform duration-200 ease-out"
-          :class="selectedTrackIndex === index ? 'scale-105' : ''"
-          @click="handleTrackPlay(track, index)"
-        >
-          <!-- Track Number or Playing Indicator -->
-          <div class="w-14 flex-shrink-0">
-            <div
-              v-if="track.uri === currentTrackUri"
-              class="flex items-end gap-[2px] h-6"
-            >
-              <div class="w-1 bg-white animate-wave0 rounded-full" />
-              <div class="w-1 bg-white animate-wave1 rounded-full" />
-              <div class="w-1 bg-white animate-wave2 rounded-full" />
-              <div class="w-1 bg-white animate-wave3 rounded-full" />
-            </div>
-            <p v-else class="text-[32px] font-[560] text-white/40">
-              {{ index + 1 }}
-            </p>
-          </div>
-
-          <!-- Track Info -->
-          <div class="flex-1 min-w-0">
-            <p class="text-[28px] font-[580] tracking-tight truncate text-white">
-              {{ track.name }}
-            </p>
-            <p class="text-[22px] font-[560] text-white/60 tracking-tight truncate">
-              {{ track.artists?.map((a: any) => a.name).join(', ') }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </template>
+  <!-- Loading -->
+  <div v-if="isLoading" class="h-screen w-full flex items-center justify-center">
+    <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
   </div>
+
+  <MediaListView
+    v-else
+    :image="artistImage"
+    :title="artistName"
+    :subtitle="followerCount"
+    image-rounded="full"
+    :items="tracks"
+    :selected-index="selectedTrackIndex"
+    :current-item-uri="currentTrackUri"
+    item-data-attribute="data-track-index"
+    @item-click="handleTrackPlay"
+  >
+    <template #item="{ item: track }">
+      <p class="text-[28px] font-[580] tracking-tight truncate text-white">
+        {{ track.name }}
+      </p>
+      <p class="text-[22px] font-[560] text-white/60 tracking-tight truncate">
+        {{ track.artists?.map((a: any) => a.name).join(', ') }}
+      </p>
+    </template>
+  </MediaListView>
 </template>
 
-<style scoped>
-/* Wave animation for currently playing track */
-@keyframes wave {
-  0%, 100% { height: 4px; }
-  50% { height: 16px; }
-}
-
-.animate-wave0 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0s;
-}
-
-.animate-wave1 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.2s;
-}
-
-.animate-wave2 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.4s;
-}
-
-.animate-wave3 {
-  animation: wave 0.8s ease-in-out infinite;
-  animation-delay: 0.6s;
-}
-</style>

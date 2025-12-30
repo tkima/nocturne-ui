@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useSettings } from '@/composables/useSettings'
 
 // ============================================================
 // Auth Store - Spotify Authentication (Device Auth + PKCE)
@@ -15,130 +16,16 @@ const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || SPOTIFY_CLIENT_ID_SH
 // Auth relay URL for PKCE (if configured)
 const AUTH_RELAY_URL = import.meta.env.VITE_AUTH_RELAY_URL || ''
 
-// Is dev mode (browser without nocturned)
+// Is dev mode (browser)
 const IS_DEV_MODE = import.meta.env.DEV
 
-// Nocturned URL for device file operations
-// Use localhost (not 127.0.0.1) to match app origin for CORS
-const NOCTURNED_URL = 'http://localhost:5000'
-
-// Token file path on device
-const TOKEN_FILE_PATH = '/etc/nocturne/tokens.json'
-
-// ============================================================
-// File-based Token Persistence (for device)
-// ============================================================
-
-interface StoredTokens {
-  accessToken: string
-  refreshToken: string
-  tokenExpiry: string
-  clientId?: string
-  authType?: string
-}
-
-/**
- * Save tokens to file on device via nocturned
- */
-async function saveTokensToFile(tokens: StoredTokens): Promise<boolean> {
-  if (IS_DEV_MODE) {
-    console.log('Token file save skipped (dev mode)')
-    return false
+// Get settings composable (singleton)
+let settingsInstance: ReturnType<typeof useSettings> | null = null
+function getSettings() {
+  if (!settingsInstance) {
+    settingsInstance = useSettings()
   }
-
-  const url = `${NOCTURNED_URL}/device/file/write`
-  const body = JSON.stringify({
-    path: TOKEN_FILE_PATH,
-    content: JSON.stringify(tokens)
-  })
-
-  console.log('Saving tokens to file:', { url, path: TOKEN_FILE_PATH })
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    })
-
-    const responseText = await response.text()
-    console.log('Token file save response:', response.status, responseText)
-
-    if (response.ok) {
-      console.log('Token file saved successfully')
-      return true
-    }
-    console.error('Token file save failed:', response.status, responseText)
-    return false
-  } catch (err) {
-    console.error('Failed to save tokens to file (network error):', err)
-    return false
-  }
-}
-
-/**
- * Load tokens from file on device via nocturned
- */
-async function loadTokensFromFile(): Promise<StoredTokens | null> {
-  if (IS_DEV_MODE) return null // Skip in dev mode
-
-  try {
-    const response = await fetch(`${NOCTURNED_URL}/device/file/read`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: TOKEN_FILE_PATH
-      })
-    })
-
-    if (response.status === 404) {
-      console.log('Token file not found on device')
-      return null
-    }
-
-    if (!response.ok) {
-      console.log('Token file load: response not ok', response.status)
-      return null
-    }
-
-    const result = await response.json()
-    console.log('Token file load result:', result)
-
-    if (result.status === 'success' && result.content) {
-      const parsed = JSON.parse(result.content)
-      console.log('Loaded tokens from file:', { hasAccess: !!parsed.accessToken, hasRefresh: !!parsed.refreshToken })
-      return parsed
-    }
-    return null
-  } catch (err) {
-    console.error('Failed to load tokens from file:', err)
-    return null
-  }
-}
-
-/**
- * Delete tokens file on device
- */
-async function deleteTokensFile(): Promise<boolean> {
-  if (IS_DEV_MODE) return false
-
-  try {
-    const response = await fetch(`${NOCTURNED_URL}/device/exec`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        commands: [
-          `mount -o remount,rw /`,
-          `rm -f ${TOKEN_FILE_PATH}`,
-          `mount -o remount,ro /`
-        ]
-      })
-    })
-    return response.ok
-  } catch (err) {
-    console.error('Failed to delete tokens file:', err)
-    return false
-  }
+  return settingsInstance
 }
 
 // ============================================================
@@ -243,7 +130,7 @@ export const useAuthStore = defineStore('auth', () => {
   // ------------------------------------------------------------
 
   /**
-   * Initialize auth state from localStorage (and file on device)
+   * Initialize auth state from localStorage and settings file
    */
   async function initFromStorage() {
     // First try localStorage (fast, works in dev)
@@ -260,24 +147,25 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
 
-    // If not in localStorage, try loading from file (device persistence)
-    const fileTokens = await loadTokensFromFile()
-    if (fileTokens?.accessToken && fileTokens?.refreshToken) {
-      accessToken.value = fileTokens.accessToken
-      refreshToken.value = fileTokens.refreshToken
-      if (fileTokens.tokenExpiry) {
-        tokenExpiry.value = new Date(fileTokens.tokenExpiry)
+    // On device, try loading from settings.json (persists across reboots)
+    if (!IS_DEV_MODE) {
+      const { settings, loadSettings } = getSettings()
+      await loadSettings()
+
+      if (settings.value.accessToken && settings.value.refreshToken) {
+        accessToken.value = settings.value.accessToken
+        refreshToken.value = settings.value.refreshToken
+        if (settings.value.tokenExpiry) {
+          tokenExpiry.value = new Date(settings.value.tokenExpiry)
+        }
+        // Sync to localStorage for faster access during session
+        localStorage.setItem('spotifyAccessToken', settings.value.accessToken)
+        localStorage.setItem('spotifyRefreshToken', settings.value.refreshToken)
+        if (settings.value.tokenExpiry) {
+          localStorage.setItem('spotifyTokenExpiry', settings.value.tokenExpiry)
+        }
+        console.log('Loaded tokens from settings.json')
       }
-      // Also sync to localStorage for faster access during session
-      localStorage.setItem('spotifyAccessToken', fileTokens.accessToken)
-      localStorage.setItem('spotifyRefreshToken', fileTokens.refreshToken)
-      if (fileTokens.tokenExpiry) {
-        localStorage.setItem('spotifyTokenExpiry', fileTokens.tokenExpiry)
-      }
-      if (fileTokens.clientId) {
-        localStorage.setItem('spotifyClientId', fileTokens.clientId)
-      }
-      console.log('Loaded tokens from persistent file storage')
     }
   }
 
@@ -767,45 +655,37 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = tokens.access_token
     tokenExpiry.value = expiryDate
 
+    // Save to localStorage (fast access during session)
     localStorage.setItem('spotifyAccessToken', tokens.access_token)
     localStorage.setItem('spotifyTokenExpiry', expiryDate.toISOString())
     localStorage.setItem('spotifyAuthType', 'pkce')
-    localStorage.setItem('_debug_auth_saved', new Date().toISOString())
 
     if (tokens.refresh_token) {
       refreshToken.value = tokens.refresh_token
       localStorage.setItem('spotifyRefreshToken', tokens.refresh_token)
     }
 
-    console.log('localStorage saved:', {
-      hasAccessToken: !!localStorage.getItem('spotifyAccessToken'),
-      hasRefreshToken: !!localStorage.getItem('spotifyRefreshToken'),
-      debugTime: localStorage.getItem('_debug_auth_saved')
+    // Also save to settings.json (persists across reboots on device)
+    if (!IS_DEV_MODE) {
+      const { set } = getSettings()
+      await set('accessToken', tokens.access_token)
+      await set('tokenExpiry', expiryDate.toISOString())
+      if (tokens.refresh_token) {
+        await set('refreshToken', tokens.refresh_token)
+      }
+      console.log('Tokens saved to settings.json')
+    }
+
+    console.log('Tokens saved:', {
+      hasAccessToken: !!accessToken.value,
+      hasRefreshToken: !!refreshToken.value
     })
-
-    // Also save to persistent file on device
-    const fileTokens: StoredTokens = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || refreshToken.value || '',
-      tokenExpiry: expiryDate.toISOString(),
-      clientId: getClientId(),
-      authType: 'pkce'
-    }
-    console.log('Attempting to save tokens to file...', { IS_DEV_MODE, fileTokens: { hasAccess: !!fileTokens.accessToken, hasRefresh: !!fileTokens.refreshToken } })
-
-    // Await the file save to ensure it completes before navigation
-    try {
-      const saved = await saveTokensToFile(fileTokens)
-      console.log('Token file save result:', saved)
-    } catch (err) {
-      console.error('Token file save error:', err)
-    }
   }
 
   /**
    * Logout - clear all auth data
    */
-  function logout() {
+  async function logout() {
     accessToken.value = null
     refreshToken.value = null
     tokenExpiry.value = null
@@ -818,8 +698,13 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('pkce_code_verifier')
     localStorage.removeItem('pkce_state')
 
-    // Also delete persistent file on device
-    deleteTokensFile()
+    // Also clear from settings.json
+    if (!IS_DEV_MODE) {
+      const { set } = getSettings()
+      await set('accessToken', null)
+      await set('refreshToken', null)
+      await set('tokenExpiry', null)
+    }
   }
 
   /**

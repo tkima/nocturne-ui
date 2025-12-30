@@ -352,6 +352,17 @@ export const useSpotifyStore = defineStore('spotify', () => {
   // Playback Actions
   // ------------------------------------------------------------
 
+  // Debounced playback fetch - resets timer on each call
+  let debouncedFetchTimeout: ReturnType<typeof setTimeout> | null = null
+
+  async function fetchPlaybackDebounced(delayMs = 500) {
+    if (debouncedFetchTimeout) clearTimeout(debouncedFetchTimeout)
+    debouncedFetchTimeout = setTimeout(async () => {
+      await fetchCurrentPlayback()
+      debouncedFetchTimeout = null
+    }, delayMs)
+  }
+
   async function fetchCurrentPlayback() {
     // Include additional_types=episode to get full episode data for podcasts
     const data = await apiRequest<SpotifyPlayback>('/me/player?additional_types=episode')
@@ -367,6 +378,16 @@ export const useSpotifyStore = defineStore('spotify', () => {
         imageUrl: data.item?.images?.[0]?.url,
       })
       currentPlayback.value = data
+
+      // Cache artist info for tracks (reduces "Unknown Artist" occurrences)
+      const trackId = data.item?.id
+      const artists = data.item?.artists
+      if (trackId && artists?.length) {
+        const artistName = artists.map(a => a.name).join(', ')
+        if (artistName) {
+          localStorage.setItem(`artist_cache_${trackId}`, artistName)
+        }
+      }
     }
     return data
   }
@@ -651,7 +672,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
             uri: string
           } | null
         }>
-      }>('/me/player/recently-played?limit=50')
+      }>('/me/player/recently-played?limit=25')
 
       if (recentData?.items) {
         // Extract radio playlist info from recently played
@@ -865,6 +886,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
     // Playback
     fetchCurrentPlayback,
+    fetchPlaybackDebounced,
     play,
     pause,
     skipToNext,

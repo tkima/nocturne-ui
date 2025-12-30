@@ -16,54 +16,62 @@ import {
   BackIcon,
   ForwardIcon,
   ShuffleIcon,
-  RepeatIcon,
-  MenuIcon
+  RepeatIcon
 } from '@/components/common/icons'
 import { logger } from '@/utils/logger'
 
-// ------------------------------------------------------------
-// Router & Stores
-// ------------------------------------------------------------
+
+/* ============================================================
+   STORES & ROUTER
+   ============================================================ */
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 
-// ------------------------------------------------------------
-// State
-// ------------------------------------------------------------
+
+/* ============================================================
+   STATE
+   ============================================================ */
+
+// --- Playback State ---
 const isLiked = ref(false)
 const isProgressScrubbing = ref(false)
 const playbackProgress = ref(0)
 let progressInterval: ReturnType<typeof setInterval> | null = null
 let playbackPollInterval: ReturnType<typeof setInterval> | null = null
 
-// Dial/wheel seek state
+
+// --- Dial/Wheel Seek State ---
 const wheelDeltaAccumulator = ref(0)
 const pendingSeekPosition = ref<number | null>(null)
 let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
-// Skip fetch debounce - resets on each skip so rapid skips don't trigger multiple fetches
-let skipFetchTimeout: ReturnType<typeof setTimeout> | null = null
-
-// Swipe gesture state
+// --- Swipe Gesture State ---
 const touchStartX = ref(0)
 const touchStartY = ref(0)
 const isSwiping = ref(false)
 const swipeThreshold = 50 // Minimum distance for swipe
 const swipeAreaRef = ref<HTMLElement | null>(null)
 
-// ------------------------------------------------------------
-// Computed
-// ------------------------------------------------------------
+// --- Error Display State ---
+const showError = ref(false)
+let errorDelayTimeout: ReturnType<typeof setTimeout> | null = null
+
+
+/* ============================================================
+   COMPUTED - PLAYBACK INFO
+   ============================================================ */
+
+// --- Core Playback ---
 const playback = computed(() => spotifyStore.currentPlayback)
 const isPlaying = computed(() => playback.value?.is_playing ?? false)
 const shuffleEnabled = computed(() => playback.value?.shuffle_state ?? false)
 const repeatMode = computed(() => playback.value?.repeat_state ?? 'off')
+
+// --- Error State ---
 const needsRetry = computed(() => spotifyStore.needsRetry)
 const retryError = computed(() => spotifyStore.retryError)
-const showError = ref(false)
-let errorDelayTimeout: ReturnType<typeof setTimeout> | null = null
 
 // Show error with 5s delay, hide immediately when resolved
 watch(needsRetry, (hasError) => {
@@ -71,28 +79,30 @@ watch(needsRetry, (hasError) => {
     clearTimeout(errorDelayTimeout)
     errorDelayTimeout = null
   }
-
   if (hasError) {
-    // Delay showing error by 5 seconds
     errorDelayTimeout = setTimeout(() => {
       showError.value = true
     }, 5000)
   } else {
-    // Hide immediately when error clears
     showError.value = false
   }
 })
 
-const trackName = computed(() => playback.value?.item?.name || 'Not Playing')
-
+// --- Episode Detection ---
 // Check if currently playing is an episode (podcast) or track
-// Also check if item has 'show' property as fallback detection
 const isEpisode = computed(() => {
   return playback.value?.currently_playing_type === 'episode' || !!playback.value?.item?.show
 })
 
 // Get episode context from store (set when playing from show view)
 const episodeContext = computed(() => spotifyStore.currentEpisodeContext)
+
+
+/* ============================================================
+   COMPUTED - TRACK INFO DISPLAY
+   ============================================================ */
+
+const trackName = computed(() => playback.value?.item?.name || 'Not Playing')
 
 const artistName = computed(() => {
   // For episodes, show the show name
@@ -105,7 +115,16 @@ const artistName = computed(() => {
   }
   // For tracks, show artist names
   const artists = playback.value?.item?.artists
-  return artists?.map(a => a.name).join(', ') || 'Unknown Artist'
+  if (artists?.length) {
+    return artists.map(a => a.name).join(', ')
+  }
+  // Fallback: check cache for this track (cached in spotify store)
+  const trackId = playback.value?.item?.id
+  if (trackId) {
+    const cached = localStorage.getItem(`artist_cache_${trackId}`)
+    if (cached) return cached
+  }
+  return 'Unknown Artist'
 })
 
 const albumArt = computed(() => {
@@ -132,23 +151,38 @@ const albumArt = computed(() => {
   return images?.[0]?.url || images?.[1]?.url || ''
 })
 
+// For tracks: album ID, for episodes: show ID
+const albumId = computed(() => playback.value?.item?.album?.id || null)
+const showId = computed(() => {
+  if (playback.value?.item?.show?.id) {
+    return playback.value.item.show.id
+  }
+  if (isEpisode.value && episodeContext.value?.showId) {
+    return episodeContext.value.showId
+  }
+  return null
+})
+
+
+/* ============================================================
+   COMPUTED - PROGRESS & TIME
+   ============================================================ */
+
 const duration = computed(() => {
-  // Try API duration first
   const apiDuration = playback.value?.item?.duration_ms || 0
   if (apiDuration > 0) return apiDuration
-
   // Fallback to stored episode context duration
   if (isEpisode.value && episodeContext.value?.episodeDuration) {
     return episodeContext.value.episodeDuration
   }
   return 0
 })
+
 const progress = computed(() => {
   if (duration.value === 0) return 0
   return (playbackProgress.value / duration.value) * 100
 })
 
-// Time formatting helper
 function formatTime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -156,74 +190,44 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-// Elapsed and remaining time
 const elapsedTime = computed(() => formatTime(playbackProgress.value))
 const remainingTime = computed(() => {
   const remaining = duration.value - playbackProgress.value
   return `-${formatTime(Math.max(0, remaining))}`
 })
 
-// For tracks: album ID, for episodes: show ID
-const albumId = computed(() => playback.value?.item?.album?.id || null)
-const showId = computed(() => {
-  // Try API show ID first
-  if (playback.value?.item?.show?.id) {
-    return playback.value.item.show.id
-  }
-  // Fallback to stored episode context
-  if (isEpisode.value && episodeContext.value?.showId) {
-    return episodeContext.value.showId
-  }
-  return null
-})
+
+/* ============================================================
+   COMPUTED - BUTTON MAPPING
+   ============================================================ */
 
 // Get content info from context URI (for button mapping)
 const mappingContent = computed(() => {
   const contextUri = playback.value?.context?.uri
   if (contextUri?.startsWith('spotify:playlist:')) {
-    return {
-      id: contextUri.replace('spotify:playlist:', ''),
-      type: 'playlist' as const
-    }
+    return { id: contextUri.replace('spotify:playlist:', ''), type: 'playlist' as const }
   }
   if (contextUri?.startsWith('spotify:album:')) {
-    return {
-      id: contextUri.replace('spotify:album:', ''),
-      type: 'album' as const
-    }
+    return { id: contextUri.replace('spotify:album:', ''), type: 'album' as const }
   }
   if (contextUri?.startsWith('spotify:show:')) {
-    return {
-      id: contextUri.replace('spotify:show:', ''),
-      type: 'show' as const
-    }
+    return { id: contextUri.replace('spotify:show:', ''), type: 'show' as const }
   }
   if (contextUri?.startsWith('spotify:artist:')) {
-    return {
-      id: contextUri.replace('spotify:artist:', ''),
-      type: 'artist' as const
-    }
+    return { id: contextUri.replace('spotify:artist:', ''), type: 'artist' as const }
   }
   // For episodes, use the show ID
   if (isEpisode.value && showId.value) {
-    return {
-      id: showId.value,
-      type: 'show' as const
-    }
+    return { id: showId.value, type: 'show' as const }
   }
   // For tracks without context, use album ID
   if (albumId.value) {
-    return {
-      id: albumId.value,
-      type: 'album' as const
-    }
+    return { id: albumId.value, type: 'album' as const }
   }
   return { id: null, type: null }
 })
 
-// ------------------------------------------------------------
 // Update global mappable content when playback changes
-// ------------------------------------------------------------
 watch(mappingContent, (content) => {
   if (content.id && content.type) {
     uiStore.setMappableContent({
@@ -235,9 +239,11 @@ watch(mappingContent, (content) => {
   }
 }, { immediate: true })
 
-// ------------------------------------------------------------
-// Close/Back handler
-// ------------------------------------------------------------
+
+/* ============================================================
+   NAVIGATION HANDLERS
+   ============================================================ */
+
 function handleClose() {
   router.push('/recents')
 }
@@ -256,12 +262,13 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
-// ------------------------------------------------------------
-// Playback Progress
-// ------------------------------------------------------------
+
+/* ============================================================
+   PROGRESS TRACKING & POLLING
+   ============================================================ */
+
 function startProgressTracking() {
   if (progressInterval) clearInterval(progressInterval)
-
   progressInterval = setInterval(() => {
     if (isPlaying.value && !isProgressScrubbing.value) {
       playbackProgress.value += 1000
@@ -277,28 +284,21 @@ function stopProgressTracking() {
 }
 
 // Poll for playback state changes (e.g., when user starts playing on phone)
-// Polls every 5s when idle, every 30s when playing
 function startPlaybackPolling() {
   if (playbackPollInterval) clearInterval(playbackPollInterval)
 
   const poll = async () => {
     if (!authStore.isAuthenticated) return
-
     await spotifyStore.fetchCurrentPlayback()
-
     // Always sync progress from server to prevent drift
     if (playback.value) {
       playbackProgress.value = playback.value.progress_ms || 0
     }
   }
 
-  // Initial poll
-  poll()
-
-  // Set up interval - sync every 15s when playing to prevent timer drift
-  playbackPollInterval = setInterval(() => {
-    poll()
-  }, isPlaying.value ? 15000 : 5000) // 15s when playing, 5s when idle
+  poll() // Initial poll
+  // 15s when playing (prevent drift), 5s when idle (detect changes faster)
+  playbackPollInterval = setInterval(poll, isPlaying.value ? 15000 : 5000)
 }
 
 function stopPlaybackPolling() {
@@ -310,15 +310,16 @@ function stopPlaybackPolling() {
 
 // Adjust polling frequency when play state changes
 watch(isPlaying, () => {
-  // Restart polling with appropriate interval
   if (playbackPollInterval) {
     startPlaybackPolling()
   }
 })
 
-// ------------------------------------------------------------
-// Handlers - Using createButtonHandler for automatic logging & throttling
-// ------------------------------------------------------------
+
+/* ============================================================
+   PLAYBACK CONTROL HANDLERS
+   ============================================================ */
+
 const handlePlayPause = createButtonHandler('Play/Pause', async () => {
   if (isPlaying.value) {
     await spotifyStore.pause()
@@ -328,43 +329,32 @@ const handlePlayPause = createButtonHandler('Play/Pause', async () => {
   await spotifyStore.fetchCurrentPlayback()
 }, 300)
 
-// Skip next - no throttle, debounced fetch (resets on each skip)
+// Reset progress after skip (with delay for smoother transition)
+function resetProgress() {
+  setTimeout(() => {
+    playbackProgress.value = 0
+  }, 1000)
+}
+
+// Skip handlers - instant action, debounced UI refresh via store
 async function handleSkipNext() {
   logger.info('Skip Next')
   await spotifyStore.skipToNext()
-
-  // Clear any pending fetch and reset the timer
-  if (skipFetchTimeout) {
-    clearTimeout(skipFetchTimeout)
-  }
-  skipFetchTimeout = setTimeout(async () => {
-    await spotifyStore.fetchCurrentPlayback()
-    playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
-    skipFetchTimeout = null
-  }, 500)
+  resetProgress()
+  spotifyStore.fetchPlaybackDebounced()
 }
 
-// Skip previous - no throttle, debounced fetch (resets on each skip)
 async function handleSkipPrevious() {
   logger.info('Skip Previous')
   await spotifyStore.skipToPrevious()
-
-  // Clear any pending fetch and reset the timer
-  if (skipFetchTimeout) {
-    clearTimeout(skipFetchTimeout)
-  }
-  skipFetchTimeout = setTimeout(async () => {
-    await spotifyStore.fetchCurrentPlayback()
-    playbackProgress.value = spotifyStore.currentPlayback?.progress_ms || 0
-    skipFetchTimeout = null
-  }, 500)
+  resetProgress()
+  spotifyStore.fetchPlaybackDebounced()
 }
 
 const handleToggleLike = createButtonHandler('Like', async () => {
   const trackId = playback.value?.item?.id
-  if (!trackId) {
-    throw new Error('No track ID')
-  }
+  if (!trackId) throw new Error('No track ID')
+
   if (isLiked.value) {
     await spotifyStore.removeTrack(trackId)
     isLiked.value = false
@@ -375,8 +365,7 @@ const handleToggleLike = createButtonHandler('Like', async () => {
 }, 500)
 
 const handleToggleShuffle = createButtonHandler('Shuffle', async () => {
-  const newState = !shuffleEnabled.value
-  await spotifyStore.setShuffle(newState)
+  await spotifyStore.setShuffle(!shuffleEnabled.value)
   await spotifyStore.fetchCurrentPlayback()
 }, 500)
 
@@ -398,12 +387,20 @@ function handleScrubbingChange(scrubbing: boolean) {
   isProgressScrubbing.value = scrubbing
 }
 
-// ------------------------------------------------------------
-// Dial/Wheel Seek Handler (±10 seconds)
-// ------------------------------------------------------------
+async function checkIfLiked() {
+  const trackId = playback.value?.item?.id
+  if (trackId) {
+    isLiked.value = await spotifyStore.checkIfTrackSaved(trackId)
+  }
+}
+
+
+/* ============================================================
+   DIAL/WHEEL SEEK (±10 seconds)
+   ============================================================ */
+
 function handleWheel(e: WheelEvent) {
   e.preventDefault()
-
   if (isProgressScrubbing.value) return
 
   // Accumulate delta (handle both horizontal and vertical scroll)
@@ -419,7 +416,6 @@ function handleWheel(e: WheelEvent) {
     const basePosition = pendingSeekPosition.value !== null
       ? pendingSeekPosition.value
       : playbackProgress.value
-
     const rawNewPosition = basePosition + direction * seekAmount
 
     // If seeking past end, skip to next song
@@ -428,7 +424,7 @@ function handleWheel(e: WheelEvent) {
       return
     }
 
-    // If seeking before start, go to previous or start
+    // If seeking before start, go to previous
     if (rawNewPosition < 0) {
       handleSkipPrevious()
       return
@@ -439,19 +435,15 @@ function handleWheel(e: WheelEvent) {
     playbackProgress.value = rawNewPosition
 
     // Debounce the actual API call
-    if (seekDebounceTimeout) {
-      clearTimeout(seekDebounceTimeout)
-    }
-
+    if (seekDebounceTimeout) clearTimeout(seekDebounceTimeout)
     seekDebounceTimeout = setTimeout(async () => {
       const seekPosition = pendingSeekPosition.value
       if (seekPosition !== null) {
         try {
           await spotifyStore.seek(seekPosition)
         } catch {
-          // Ignore seek errors - don't show connection error for seek failures
+          // Ignore seek errors
         }
-        // Clear any transient errors from seeking
         spotifyStore.clearRetryState()
         pendingSeekPosition.value = null
         logger.info('Dial seek completed', { position: seekPosition })
@@ -460,9 +452,11 @@ function handleWheel(e: WheelEvent) {
   }
 }
 
-// ------------------------------------------------------------
-// Swipe Gesture Handlers (for next/previous track)
-// ------------------------------------------------------------
+
+/* ============================================================
+   SWIPE GESTURES (next/previous track)
+   ============================================================ */
+
 function handleTouchStart(e: TouchEvent) {
   const touch = e.touches[0]
   if (!touch) return
@@ -496,11 +490,9 @@ function handleTouchEnd(e: TouchEvent) {
   // Simple check: if moved more than threshold horizontally
   if (Math.abs(deltaX) > swipeThreshold) {
     if (deltaX < 0) {
-      // Swipe left -> next track
-      handleSkipNext()
+      handleSkipNext() // Swipe left -> next track
     } else {
-      // Swipe right -> previous track
-      handleSkipPrevious()
+      handleSkipPrevious() // Swipe right -> previous track
     }
   }
 
@@ -510,28 +502,24 @@ function handleTouchEnd(e: TouchEvent) {
   isSwiping.value = false
 }
 
-// Check if current track is liked
-async function checkIfLiked() {
-  const trackId = playback.value?.item?.id
-  if (trackId) {
-    isLiked.value = await spotifyStore.checkIfTrackSaved(trackId)
-  }
-}
 
-// ------------------------------------------------------------
-// Lifecycle
-// ------------------------------------------------------------
+/* ============================================================
+   LIFECYCLE
+   ============================================================ */
+
 onMounted(async () => {
+  // Register event listeners
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('wheel', handleWheel, { passive: false })
 
-  // Attach swipe listeners with passive: false to allow preventDefault
+  // Attach swipe listeners
   if (swipeAreaRef.value) {
     swipeAreaRef.value.addEventListener('touchstart', handleTouchStart, { passive: true })
     swipeAreaRef.value.addEventListener('touchmove', handleTouchMove, { passive: false })
     swipeAreaRef.value.addEventListener('touchend', handleTouchEnd)
   }
 
+  // Initialize playback
   authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await spotifyStore.fetchCurrentPlayback()
@@ -539,7 +527,6 @@ onMounted(async () => {
       playbackProgress.value = playback.value.progress_ms || 0
       await checkIfLiked()
 
-      // Debug: log what data we have for episodes
       logger.info('Now Playing mounted', {
         type: playback.value.currently_playing_type,
         isEpisode: isEpisode.value,
@@ -559,19 +546,18 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // Remove event listeners
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('wheel', handleWheel)
+
+  // Stop intervals
   stopProgressTracking()
   stopPlaybackPolling()
-  if (seekDebounceTimeout) {
-    clearTimeout(seekDebounceTimeout)
-  }
-  if (errorDelayTimeout) {
-    clearTimeout(errorDelayTimeout)
-  }
-  if (skipFetchTimeout) {
-    clearTimeout(skipFetchTimeout)
-  }
+
+  // Clear timeouts
+  if (seekDebounceTimeout) clearTimeout(seekDebounceTimeout)
+  if (errorDelayTimeout) clearTimeout(errorDelayTimeout)
+
   // Remove swipe listeners
   if (swipeAreaRef.value) {
     swipeAreaRef.value.removeEventListener('touchstart', handleTouchStart)
@@ -709,9 +695,6 @@ onUnmounted(() => {
             />
           </div>
 
-          <div class="cursor-pointer focus:outline-none">
-            <MenuIcon class="w-14 h-14 fill-white/60" />
-          </div>
         </div>
       </div>
   </div>

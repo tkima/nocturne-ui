@@ -6,6 +6,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSpotifyStore } from '@/stores/spotify'
+import { useSettings, type BooleanSettingKey } from '@/composables/useSettings'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -14,6 +15,7 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const spotifyStore = useSpotifyStore()
+const { toggle, get } = useSettings()
 
 // Navigation state
 const currentView = ref<'main' | 'section'>('main')
@@ -171,23 +173,14 @@ const settingsStructure: Record<string, SettingSection> = {
   },
 }
 
-// Toggle settings
-const toggleSettings = ref<Record<string, boolean>>({})
-
-function getSettingValue(key: string, defaultValue: boolean): boolean {
-  if (toggleSettings.value[key] !== undefined) {
-    return toggleSettings.value[key]
-  }
-  const stored = localStorage.getItem(key)
-  const value = stored !== null ? stored === 'true' : defaultValue
-  toggleSettings.value[key] = value
-  return value
+// Get setting value from composable
+function getSettingValue(key: string): boolean {
+  return get(key as BooleanSettingKey) as boolean
 }
 
+// Toggle setting via composable (persists to file)
 function toggleSetting(key: string) {
-  const newValue = !toggleSettings.value[key]
-  toggleSettings.value[key] = newValue
-  localStorage.setItem(key, String(newValue))
+  toggle(key as BooleanSettingKey)
 }
 
 // Navigation
@@ -323,12 +316,12 @@ const activeSectionData = computed(() => {
                   </span>
                   <button
                     class="relative w-20 h-11 rounded-full transition-colors duration-200"
-                    :class="getSettingValue(item.storageKey, item.defaultValue ?? false) ? 'bg-white/40' : 'bg-white/10'"
+                    :class="getSettingValue(item.storageKey) ? 'bg-white/40' : 'bg-white/10'"
                     @click="toggleSetting(item.storageKey)"
                   >
                     <span
                       class="absolute top-0.5 left-0.5 w-10 h-10 bg-white rounded-full shadow transition-transform duration-200"
-                      :class="getSettingValue(item.storageKey, item.defaultValue ?? false) ? 'translate-x-9' : 'translate-x-0'"
+                      :class="getSettingValue(item.storageKey) ? 'translate-x-9' : 'translate-x-0'"
                     />
                   </button>
                 </div>

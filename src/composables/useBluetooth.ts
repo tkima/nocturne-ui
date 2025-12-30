@@ -1,6 +1,9 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useConfigStore } from '@/stores/config'
 
+// Check if Bluetooth is enabled via environment variable
+const BLUETOOTH_ENABLED = import.meta.env.VITE_BLUETOOTH_ENABLED !== 'false'
+
 export interface BluetoothDevice {
   address: string
   name: string
@@ -528,6 +531,12 @@ export function useBluetooth() {
 
   // Initialize
   async function init() {
+    // Skip initialization if Bluetooth is disabled
+    if (!BLUETOOTH_ENABLED) {
+      console.log('Bluetooth disabled via VITE_BLUETOOTH_ENABLED=false')
+      return
+    }
+
     connectWebSocket()
     await startDiscovery()
     await fetchDevices()
