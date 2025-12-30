@@ -10,7 +10,7 @@
 
 ## Prerequisites
 
-Before using this UI, you need a **jailbroken Spotify Car Thing** with the Nocturne firmware installed.
+Before using this UI, you need a **Spotify Car Thing** with the Nocturne firmware installed. No permanent jailbreak required - it just works in USB boot mode.
 
 ### Step 1: Flash Your Car Thing
 
