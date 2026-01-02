@@ -4,12 +4,12 @@
 
 import { ref } from 'vue'
 
-// Import settings to check if debug is enabled
-// Using dynamic import to avoid circular dependency
-let getDebugEnabled: () => boolean = () => false
+// Check env variable directly - works at module load time
+const DEBUG_ENABLED = import.meta.env.VITE_DEBUG_ENABLED === 'true'
 
-export function initDebugFromSettings(getter: () => boolean) {
-  getDebugEnabled = getter
+// Legacy function for backwards compatibility
+export function initDebugFromSettings(_getter: () => boolean) {
+  // No-op - we use env variable directly now
 }
 
 export interface DebugLogEntry {
@@ -37,7 +37,7 @@ export function addDebugLog(
   type: DebugLogEntry['type'] = 'info'
 ) {
   // Skip entirely if debug is disabled - no overhead
-  if (!getDebugEnabled()) return
+  if (!DEBUG_ENABLED) return
 
   const now = new Date()
   const time = now.toLocaleTimeString('en-US', { hour12: false }) + '.' +

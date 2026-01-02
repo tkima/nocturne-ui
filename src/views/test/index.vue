@@ -49,7 +49,7 @@ function clearLogs() {
 // Token Management
 // ------------------------------------------------------------
 function loadToken() {
-  authStore.initFromStorage()
+  // Token is already loaded by boot system
   if (authStore.accessToken) {
     log(`Token loaded: ${authStore.accessToken.substring(0, 30)}...`, 'success')
   } else {

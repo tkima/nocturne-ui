@@ -1,11 +1,11 @@
 <!-- ============================================================
      LoadingScreen - Initial boot loading screen with progress bar
+     Uses boot store for criticalReady state
      ============================================================ -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useNetwork } from '@/composables/useNetwork'
 import { useUiStore } from '@/stores/ui'
-import { useSettings } from '@/composables/useSettings'
+import { useBootStore } from '@/stores/boot'
 import GradientBackground from './GradientBackground.vue'
 import { NocturneIcon } from './icons'
 
@@ -22,31 +22,26 @@ const emit = defineEmits<{
 }>()
 
 const uiStore = useUiStore()
-const network = useNetwork()
-const { loadSettings } = useSettings()
+const bootStore = useBootStore()
 
-const progress = ref(0)
 const bootCounterDone = ref(false)
-const networkCheckDone = ref(false)
-const minWaitDone = ref(false) // Minimum wait time to let network settle
-const settingsLoaded = ref(false) // Settings loaded from file
 let completeCalled = false
 
-// Progress calculation - 4 tasks: boot counter + network check + min wait + settings
-const tasksTotal = 4
+// Progress: 2 tasks - boot counter + criticalReady
+const tasksTotal = 2
 const completedTasks = computed(() => {
   let count = 0
   if (bootCounterDone.value) count++
-  if (networkCheckDone.value) count++
-  if (minWaitDone.value) count++
-  if (settingsLoaded.value) count++
+  if (bootStore.criticalReady) count++
   return count
 })
 
-// Update progress when tasks complete
-watch(completedTasks, (count) => {
-  progress.value = Math.floor((count / tasksTotal) * 100)
+const progress = computed(() => {
+  return Math.floor((completedTasks.value / tasksTotal) * 100)
+})
 
+// Watch for completion
+watch(completedTasks, (count) => {
   if (count === tasksTotal && !completeCalled) {
     completeCalled = true
     // Small delay before completing
@@ -55,20 +50,6 @@ watch(completedTasks, (count) => {
     }, 500)
   }
 })
-
-// Watch network check - but also wait for connection if initial check says not connected
-watch(
-  [() => network.initialCheckDone.value, () => network.isConnected.value],
-  ([done, connected]) => {
-    // Wait until:
-    // 1. Initial check is done AND connected, OR
-    // 2. Initial check is done AND we've waited long enough (minWaitDone)
-    if (done && (connected === true || minWaitDone.value)) {
-      networkCheckDone.value = true
-    }
-  },
-  { immediate: true }
-)
 
 // Reset boot counter on device
 async function resetBootCounter() {
@@ -83,24 +64,11 @@ async function resetBootCounter() {
   }
 }
 
-onMounted(async () => {
+onMounted(() => {
   if (props.show) {
     uiStore.setGradientColors(['#1a4a3a', '#2d1f3d'])
     resetBootCounter()
-
-    // Load settings early so routing decisions have correct values
-    await loadSettings()
-    settingsLoaded.value = true
-
-    // Minimum wait time (3 seconds) to let bluetooth/network settle on device
-    // This ensures we don't flash "no connection" immediately
-    setTimeout(() => {
-      minWaitDone.value = true
-      // Also mark network check done if still waiting (fallback)
-      if (!networkCheckDone.value) {
-        networkCheckDone.value = true
-      }
-    }, 3000)
+    // Boot sequence is started by App.vue, we just watch criticalReady
   }
 })
 </script>

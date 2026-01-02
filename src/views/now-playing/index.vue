@@ -561,7 +561,6 @@ onMounted(async () => {
 
 
   // Initialize playback
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await spotifyStore.fetchCurrentPlayback()
     if (playback.value) {

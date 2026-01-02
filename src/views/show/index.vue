@@ -126,7 +126,6 @@ function formatDate(dateString: string): string {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await fetchShowData()
     await spotifyStore.fetchCurrentPlayback()

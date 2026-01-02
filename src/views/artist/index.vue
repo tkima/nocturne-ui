@@ -119,7 +119,6 @@ async function handleTrackPlay(track: Track, index: number) {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await fetchArtistData()
     await spotifyStore.fetchCurrentPlayback()

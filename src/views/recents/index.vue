@@ -12,7 +12,7 @@ import { logger } from '@/utils/logger'
 import { createLogger } from '@/utils/debug'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 
-const log = createLogger('Spotify')
+const log = createLogger('Recents')
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -131,17 +131,29 @@ function stopPlaybackPolling() {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
-  if (authStore.isAuthenticated) {
-    // Fetch both albums and playlists in parallel
-    await Promise.all([
-      spotifyStore.fetchRecentlyPlayed(),
-      spotifyStore.fetchUserPlaylists(),
-      spotifyStore.fetchCurrentPlayback()
-    ])
+  log.info(`onMounted: isAuth=${authStore.isAuthenticated}, token=${!!authStore.accessToken}`)
 
-    // Start polling
-    startPlaybackPolling()
+  if (authStore.isAuthenticated) {
+    log.info('Fetching recents + playlists...')
+    try {
+      await Promise.all([
+        spotifyStore.fetchRecentlyPlayed(),
+        spotifyStore.fetchUserPlaylists(),
+        spotifyStore.fetchCurrentPlayback()
+      ])
+      log.success(`Fetched ${albums.value.length} albums, ${playlists.value.length} playlists`)
+
+      // Check for errors
+      if (spotifyStore.needsRetry) {
+        log.error(`Fetch failed: ${spotifyStore.retryError}`)
+      }
+
+      startPlaybackPolling()
+    } catch (e) {
+      log.error(`Fetch error: ${e instanceof Error ? e.message : 'unknown'}`)
+    }
+  } else {
+    log.warn('Not authenticated, skipping fetch')
   }
 })
 

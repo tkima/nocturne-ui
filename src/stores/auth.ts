@@ -133,7 +133,9 @@ export const useAuthStore = defineStore('auth', () => {
   // ------------------------------------------------------------
 
   /**
-   * Initialize auth state from localStorage and settings file
+   * Initialize auth state from localStorage and settings file.
+   * @deprecated Use the boot system (src/boot/AuthComponent.ts) instead.
+   * This is kept for the test page "Reload Token" button.
    */
   async function initFromStorage() {
     log.info('initFromStorage called')

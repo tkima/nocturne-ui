@@ -44,7 +44,6 @@ async function handleTrackClick(track: Track, index: number) {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await spotifyStore.fetchTopTracks()
   }

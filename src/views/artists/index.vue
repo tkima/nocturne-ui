@@ -43,7 +43,6 @@ function handleArtistClick(artistId: string) {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await spotifyStore.fetchTopArtists()
   }

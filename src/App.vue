@@ -11,7 +11,8 @@ import { useNetwork } from '@/composables/useNetwork'
 import { useBluetooth } from '@/composables/useBluetooth'
 import { useGlobalKeys } from '@/composables/useGlobalKeys'
 import { useSettings } from '@/composables/useSettings'
-import { startBootSequence } from '@/utils/startup'
+import { startBoot } from '@/boot'
+import { useBootStore } from '@/stores/boot'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import GradientBackground from '@/components/common/GradientBackground.vue'
 import PowerMenuOverlay from '@/components/common/PowerMenuOverlay.vue'
@@ -35,6 +36,7 @@ const authStore = useAuthStore()
 const config = useConfigStore()
 const network = useNetwork()
 const bluetooth = useBluetooth()
+const bootStore = useBootStore()
 
 const {
   powerMenuVisible,
@@ -50,7 +52,7 @@ const {
 // ------------------------------------------------------------
 const isDev = import.meta.env.DEV
 const showLoader = ref(true)
-const { settings, loadSettings } = useSettings()
+const { settings } = useSettings()
 
 // ------------------------------------------------------------
 // Computed
@@ -105,18 +107,12 @@ watch(
 onMounted(async () => {
   log.info('App mounted, initializing...')
 
-  // Load settings FIRST (needed for auth tokens on device)
-  await loadSettings()
-  log.info(`Settings loaded: startNP=${settings.value.startWithNowPlaying}, hasToken=${!!settings.value.accessToken}`)
-
-  // Then load auth from settings
-  await authStore.initFromStorage()
-  log.info(`Auth init: auth=${authStore.isAuthenticated}`)
-
   setupGlobalKeys()
 
-  // Start controlled boot sequence
-  await startBootSequence()
+  // Start the unified boot sequence
+  // This handles: Settings → Auth (critical) → Network → Bluetooth (background)
+  await startBoot()
+  log.info(`Boot complete: criticalReady=${bootStore.criticalReady}, auth=${authStore.isAuthenticated}`)
 })
 
 onUnmounted(() => {
@@ -143,8 +139,7 @@ function handleReboot() {
 async function handleLoadingComplete() {
   showLoader.value = false
 
-  // Auth should already be loaded from onMounted, but double-check
-  log.info(`Route decision: auth=${authStore.isAuthenticated}, net=${network.isConnected.value}, startNP=${settings.value.startWithNowPlaying}`)
+  log.info(`Route decision: auth=${authStore.isAuthenticated}, netReady=${bootStore.networkReady}, startNP=${settings.value.startWithNowPlaying}`)
 
   if (authStore.isAuthenticated) {
     // Check if user prefers to start with Now Playing
@@ -154,7 +149,7 @@ async function handleLoadingComplete() {
     if (route.path !== startRoute) {
       router.replace(startRoute)
     }
-  } else if (!network.isConnected.value && !network.hasEverConnectedThisSession.value) {
+  } else if (!bootStore.networkReady) {
     log.info('No network -> /auth/network')
     router.replace('/auth/network')
   } else if (!isPublicPath()) {

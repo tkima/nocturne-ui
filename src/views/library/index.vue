@@ -55,7 +55,6 @@ async function handlePlaylistClick(playlistId: string) {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await Promise.all([
       spotifyStore.fetchUserPlaylists(),

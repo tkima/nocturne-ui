@@ -155,8 +155,7 @@ onMounted(async () => {
   // Set auth gradient
   uiStore.setGradientColors(['#1a4a3a', '#2d1f3d'])
 
-  // Check if already authenticated (load from localStorage or file)
-  await authStore.initFromStorage()
+  // Check if already authenticated (tokens loaded by boot system)
   if (authStore.isAuthenticated) {
     router.push('/recents')
   } else {

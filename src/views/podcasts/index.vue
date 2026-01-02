@@ -35,7 +35,6 @@ function handleShowClick(showId: string) {
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
-  authStore.initFromStorage()
   if (authStore.isAuthenticated) {
     await spotifyStore.fetchUserShows()
   }

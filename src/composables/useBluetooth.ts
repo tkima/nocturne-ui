@@ -1,12 +1,8 @@
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { useSettings } from '@/composables/useSettings'
 import { createLogger } from '@/utils/debug'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
-import { registerBluetoothInit, registerPresenceInit } from '@/utils/startup'
-
-// Check if Bluetooth is enabled via environment variable
-const BLUETOOTH_ENABLED = import.meta.env.VITE_BLUETOOTH_ENABLED !== 'false'
 
 const log = createLogger('BT')
 
@@ -45,13 +41,10 @@ const wsConnected = ref(false)
 let ws: WebSocket | null = null
 let wsReconnectTimeout: ReturnType<typeof setTimeout> | null = null
 let reconnectLoopRunning = false
-let initStarted = false  // Singleton init flag
-let presenceCheckInterval: ReturnType<typeof setInterval> | null = null
-let devicePresent = false  // Track if saved device is nearby
 
 export function useBluetooth() {
   const config = useConfigStore()
-  const { get: getSetting, set: setSetting, loadSettings } = useSettings()
+  const { get: getSetting, set: setSetting } = useSettings()
   const { setBtPresent } = useBluetoothTrigger()
 
   // ============================================================
@@ -97,13 +90,9 @@ export function useBluetooth() {
   }
 
   // ============================================================
-  // SIMPLE RECONNECT FLOW
+  // RECONNECT
   // ============================================================
 
-  /**
-   * Try to connect to saved device once.
-   * Presence detection loop handles retries.
-   */
   async function reconnect(): Promise<boolean> {
     const savedAddress = getSetting('lastBluetoothDevice')
     if (!savedAddress) {
@@ -112,21 +101,18 @@ export function useBluetooth() {
     }
     log.info(`Connecting to ${savedAddress.slice(-8)}...`)
 
-    // Check if already connected
     const deviceList = await fetchDevices()
     if (deviceList.some(d => d.address === savedAddress && d.connected)) {
       log.success('Already connected')
       return true
     }
 
-    // Try to connect using bt-connect.sh
     isConnecting.value = true
 
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 45000)
 
-      // Use bt-connect.sh script which deletes NAP profile before connecting
       const response = await fetch(`${config.nocturnedUrl}/device/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -153,11 +139,10 @@ export function useBluetooth() {
         return true
       }
 
-      // Script failed, check if connected anyway
       log.warn(`Script exit ${cmdResult?.exit_code}, verifying...`)
       isConnecting.value = false
-      const deviceList = await fetchDevices()
-      const isConnected = deviceList.some(d => d.address === savedAddress && d.connected)
+      const verifyList = await fetchDevices()
+      const isConnected = verifyList.some(d => d.address === savedAddress && d.connected)
       if (isConnected) {
         log.success('Verified: BT is connected!')
         return true
@@ -174,9 +159,6 @@ export function useBluetooth() {
     }
   }
 
-  /**
-   * Attempt reconnect once. Presence loop handles retries.
-   */
   async function startReconnectLoop(): Promise<void> {
     if (reconnectLoopRunning) return
 
@@ -185,7 +167,6 @@ export function useBluetooth() {
 
     const success = await reconnect()
     if (success) {
-      devicePresent = true
       setBtPresent(true)
     }
 
@@ -196,66 +177,6 @@ export function useBluetooth() {
   function stopReconnecting() {
     isReconnecting.value = false
   }
-
-  // ============================================================
-  // PRESENCE DETECTION - Lightweight polling to detect device nearby
-  // ============================================================
-
-  /**
-   * Check if saved device is in discovery list (nearby)
-   * Returns true if device found, false otherwise
-   */
-  async function checkPresence(): Promise<boolean> {
-    const savedAddress = getSetting('lastBluetoothDevice')
-    if (!savedAddress) return false
-
-    const deviceList = await fetchDevices()
-    return deviceList.some(d => d.address === savedAddress)
-  }
-
-  /**
-   * Start presence detection loop
-   * - Check every 2s when device not present
-   * - Check every 5min when device is present
-   */
-  function startPresenceLoop() {
-    if (presenceCheckInterval) return // Already running
-
-    log.info('Starting presence detection')
-
-    const runCheck = async () => {
-      const found = await checkPresence()
-
-      if (found && !devicePresent) {
-        // Device just appeared - trigger reconnect
-        log.success('Device appeared - triggering reconnect')
-        devicePresent = true
-        setBtPresent(true)
-        startReconnectLoop()
-      } else if (!found && devicePresent) {
-        // Device disappeared
-        log.warn('Device gone')
-        devicePresent = false
-        setBtPresent(false)
-      }
-
-      // Schedule next check: 3s if not present, 5min if present
-      const nextDelay = devicePresent ? 300000 : 3000
-      presenceCheckInterval = setTimeout(runCheck, nextDelay)
-    }
-
-    // Start first check after 5min (give initial reconnect time to work)
-    presenceCheckInterval = setTimeout(runCheck, 300000)
-  }
-
-  function _stopPresenceLoop() {
-    if (presenceCheckInterval) {
-      clearTimeout(presenceCheckInterval)
-      presenceCheckInterval = null
-    }
-  }
-  // Keep reference to avoid unused warning
-  void _stopPresenceLoop
 
   // ============================================================
   // DEVICE ACTIONS
@@ -270,7 +191,6 @@ export function useBluetooth() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 45000)
 
-      // Use bt-connect.sh script which deletes NAP profile before connecting
       const response = await fetch(`${config.nocturnedUrl}/device/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -295,7 +215,6 @@ export function useBluetooth() {
         return true
       }
 
-      // Script failed, check if connected anyway
       log.warn(`Script exit ${cmdResult?.exit_code}, verifying...`)
       const deviceList = await fetchDevices()
       const isConnected = deviceList.some(d => d.address === address && d.connected)
@@ -390,13 +309,12 @@ export function useBluetooth() {
   }
 
   // ============================================================
-  // WEBSOCKET - Just for pairing events, not for reconnect logic
+  // WEBSOCKET - For pairing events
   // ============================================================
 
   function connectWebSocket() {
     if (ws && ws.readyState === WebSocket.OPEN) return
 
-    // Clear any pending reconnect
     if (wsReconnectTimeout) {
       clearTimeout(wsReconnectTimeout)
       wsReconnectTimeout = null
@@ -434,8 +352,6 @@ export function useBluetooth() {
 
   function handleWsMessage(data: { type: string; payload?: unknown }) {
     const payload = data.payload as { address?: string; device?: { address: string; name?: string } } | undefined
-
-    // Normalize event type (handle both / and \\ separators)
     const eventType = data.type.replace(/\\\\/g, '/').replace(/\\/g, '/')
     log.info(`WS: ${eventType}`)
 
@@ -456,7 +372,6 @@ export function useBluetooth() {
 
       case 'bluetooth/connect':
         log.success(`Device connected: ${payload?.address?.slice(-8) || '?'}`)
-        devicePresent = true
         if (payload?.address) {
           setSetting('lastBluetoothDevice', payload.address)
         }
@@ -466,12 +381,10 @@ export function useBluetooth() {
       case 'bluetooth/disconnect':
       case 'bluetooth/disconnected':
         log.warn(`Device disconnected: ${payload?.address?.slice(-8) || '?'}`)
-        // Don't auto-reconnect from WS events - let user trigger manually or on next boot
         fetchDevices()
         break
 
       case 'bluetooth/network/disconnect':
-        // NAP disconnected - ignore, we don't use Personal Hotspot
         log.info('NAP disconnected (ignored)')
         break
     }
@@ -487,36 +400,6 @@ export function useBluetooth() {
     await startDiscovery()
     await fetchDevices()
   }
-
-  // ============================================================
-  // LIFECYCLE - Register with centralized startup
-  // ============================================================
-
-  if (BLUETOOTH_ENABLED && !initStarted) {
-    initStarted = true
-
-    // Register init functions - will be called by startup.ts
-    registerBluetoothInit(() => {
-      log.info('Initializing Bluetooth...')
-      loadSettings()
-      connectWebSocket()
-      fetchDevices()
-    })
-
-    registerPresenceInit(() => {
-      log.info('Starting presence detection...')
-      // Try initial reconnect, then start presence loop
-      const savedDevice = getSetting('lastBluetoothDevice')
-      if (savedDevice) {
-        startReconnectLoop()
-        startPresenceLoop()
-      }
-    })
-  }
-
-  onUnmounted(() => {
-    // Note: We don't cleanup on unmount since state is singleton
-  })
 
   // ============================================================
   // EXPORTS
@@ -547,15 +430,11 @@ export function useBluetooth() {
 
     // Reconnect
     reconnect,
-    attemptReconnect: startReconnectLoop, // Alias for compatibility
+    attemptReconnect: startReconnectLoop,
     stopReconnecting,
 
     // Init
     initOnDemand,
     refresh: fetchDevices,
-
-    // Legacy compatibility (unused but exported)
-    startNetworkPolling: () => {},
-    stopNetworkPolling: () => {},
   }
 }
