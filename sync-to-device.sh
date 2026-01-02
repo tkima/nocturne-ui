@@ -69,11 +69,14 @@ ssh ${DEVICE_USER}@${DEVICE_IP} "rm -rf /var/cache/chrome_storage/Default/Code\ 
 ssh ${DEVICE_USER}@${DEVICE_IP} "rm -rf /var/cache/chrome_storage/Default/GPUCache/* 2>/dev/null || true"
 echo -e "${GREEN}Cache cleared${NC}"
 
-# Step 4: Deploy files
+# Step 4: Deploy files (preserve settings.json on device)
 echo -e "\n${YELLOW}[4/4] Deploying to device...${NC}"
 ssh ${DEVICE_USER}@${DEVICE_IP} "mount -o remount,rw /"
 ssh ${DEVICE_USER}@${DEVICE_IP} "rm -rf ${REMOTE_PATH}/assets/*"
+# Backup settings.json, deploy, restore
+ssh ${DEVICE_USER}@${DEVICE_IP} "cp ${REMOTE_PATH}/settings.json /tmp/settings.json.bak 2>/dev/null || true"
 scp -r dist/* ${DEVICE_USER}@${DEVICE_IP}:${REMOTE_PATH}/
+ssh ${DEVICE_USER}@${DEVICE_IP} "cp /tmp/settings.json.bak ${REMOTE_PATH}/settings.json 2>/dev/null || true"
 ssh ${DEVICE_USER}@${DEVICE_IP} "mount -o remount,ro /"
 echo -e "${GREEN}Files deployed${NC}"
 
