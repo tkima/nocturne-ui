@@ -71,7 +71,10 @@ echo -e "${GREEN}Cache cleared${NC}"
 
 # Step 4: Deploy files
 echo -e "\n${YELLOW}[4/4] Deploying to device...${NC}"
+ssh ${DEVICE_USER}@${DEVICE_IP} "mount -o remount,rw /"
+ssh ${DEVICE_USER}@${DEVICE_IP} "rm -rf ${REMOTE_PATH}/assets/*"
 scp -r dist/* ${DEVICE_USER}@${DEVICE_IP}:${REMOTE_PATH}/
+ssh ${DEVICE_USER}@${DEVICE_IP} "mount -o remount,ro /"
 echo -e "${GREEN}Files deployed${NC}"
 
 # Step 5: Reload browser
