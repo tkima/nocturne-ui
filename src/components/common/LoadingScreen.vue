@@ -5,6 +5,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useNetwork } from '@/composables/useNetwork'
 import { useUiStore } from '@/stores/ui'
+import { useSettings } from '@/composables/useSettings'
 import GradientBackground from './GradientBackground.vue'
 import { NocturneIcon } from './icons'
 
@@ -22,20 +23,23 @@ const emit = defineEmits<{
 
 const uiStore = useUiStore()
 const network = useNetwork()
+const { loadSettings } = useSettings()
 
 const progress = ref(0)
 const bootCounterDone = ref(false)
 const networkCheckDone = ref(false)
 const minWaitDone = ref(false) // Minimum wait time to let network settle
+const settingsLoaded = ref(false) // Settings loaded from file
 let completeCalled = false
 
-// Progress calculation - now 3 tasks: boot counter + network check + min wait
-const tasksTotal = 3
+// Progress calculation - 4 tasks: boot counter + network check + min wait + settings
+const tasksTotal = 4
 const completedTasks = computed(() => {
   let count = 0
   if (bootCounterDone.value) count++
   if (networkCheckDone.value) count++
   if (minWaitDone.value) count++
+  if (settingsLoaded.value) count++
   return count
 })
 
@@ -79,10 +83,14 @@ async function resetBootCounter() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (props.show) {
     uiStore.setGradientColors(['#1a4a3a', '#2d1f3d'])
     resetBootCounter()
+
+    // Load settings early so routing decisions have correct values
+    await loadSettings()
+    settingsLoaded.value = true
 
     // Minimum wait time (3 seconds) to let bluetooth/network settle on device
     // This ensures we don't flash "no connection" immediately

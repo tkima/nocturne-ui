@@ -10,13 +10,20 @@ import { useConfigStore } from '@/stores/config'
 import { useNetwork } from '@/composables/useNetwork'
 import { useBluetooth } from '@/composables/useBluetooth'
 import { useGlobalKeys } from '@/composables/useGlobalKeys'
+import { useSettings } from '@/composables/useSettings'
+import { startBootSequence } from '@/utils/startup'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import GradientBackground from '@/components/common/GradientBackground.vue'
 import PowerMenuOverlay from '@/components/common/PowerMenuOverlay.vue'
 import PairingScreen from '@/components/auth/PairingScreen.vue'
 import LoadingScreen from '@/components/common/LoadingScreen.vue'
 import ButtonMappingOverlay from '@/components/common/ButtonMappingOverlay.vue'
+import ToastMessage from '@/components/common/ToastMessage.vue'
+import DebugOverlay from '@/components/common/DebugOverlay.vue'
 import { logger } from '@/utils/logger'
+import { createLogger } from '@/utils/debug'
+
+const log = createLogger('App')
 
 // ------------------------------------------------------------
 // Stores & Composables
@@ -43,6 +50,7 @@ const {
 // ------------------------------------------------------------
 const isDev = import.meta.env.DEV
 const showLoader = ref(true)
+const { settings, loadSettings } = useSettings()
 
 // ------------------------------------------------------------
 // Computed
@@ -90,12 +98,25 @@ watch(
   }
 )
 
+
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
+  log.info('App mounted, initializing...')
+
+  // Load settings FIRST (needed for auth tokens on device)
+  await loadSettings()
+  log.info(`Settings loaded: startNP=${settings.value.startWithNowPlaying}, hasToken=${!!settings.value.accessToken}`)
+
+  // Then load auth from settings
   await authStore.initFromStorage()
+  log.info(`Auth init: auth=${authStore.isAuthenticated}`)
+
   setupGlobalKeys()
+
+  // Start controlled boot sequence
+  await startBootSequence()
 })
 
 onUnmounted(() => {
@@ -119,23 +140,25 @@ function handleReboot() {
   closePowerMenu()
 }
 
-function handleLoadingComplete() {
+async function handleLoadingComplete() {
   showLoader.value = false
 
-  logger.info('Loading complete', {
-    isConnected: network.isConnected.value,
-    hasEverConnected: network.hasEverConnectedThisSession.value,
-    isAuthenticated: authStore.isAuthenticated,
-    currentPath: route.path
-  })
+  // Auth should already be loaded from onMounted, but double-check
+  log.info(`Route decision: auth=${authStore.isAuthenticated}, net=${network.isConnected.value}, startNP=${settings.value.startWithNowPlaying}`)
 
   if (authStore.isAuthenticated) {
-    if (route.path.startsWith('/auth/')) {
-      router.replace('/recents')
+    // Check if user prefers to start with Now Playing
+    const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/recents'
+    log.info(`Authenticated -> ${startRoute} (current: ${route.path})`)
+    // Only navigate if we're not already on the correct route
+    if (route.path !== startRoute) {
+      router.replace(startRoute)
     }
   } else if (!network.isConnected.value && !network.hasEverConnectedThisSession.value) {
+    log.info('No network -> /auth/network')
     router.replace('/auth/network')
   } else if (!isPublicPath()) {
+    log.info('Not authenticated -> /auth/login')
     router.replace('/auth/login')
   }
 }
@@ -147,6 +170,9 @@ function handleLoadingComplete() {
     :class="{ 'hide-cursor': !isDev }"
     style="font-family: var(--font-inter), system-ui, sans-serif; font-optical-sizing: auto;"
   >
+    <!-- Global Toast Message -->
+    <ToastMessage />
+
     <!-- Dynamic gradient background -->
     <GradientBackground :gradient-state="uiStore.gradientStyle" />
 
@@ -206,7 +232,10 @@ function handleLoadingComplete() {
       class="fixed top-4 right-4 z-50 flex items-center gap-2 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full"
     >
       <div class="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-      <span class="text-[18px] text-white/90">No Internet</span>
+      <span class="text-[18px] text-white/90"> No Internet</span>
     </div>
+
+    <!-- Debug Overlay -->
+    <DebugOverlay v-if="settings.debugOverlayEnabled" />
   </main>
 </template>

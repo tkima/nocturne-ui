@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useSpotifyStore } from '@/stores/spotify'
 import { getPreset } from '@/composables/useButtonMapping'
+import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 
 const LONG_PRESS_DURATION = 2000 // 2 seconds for long press to map
@@ -20,6 +21,7 @@ export function useGlobalKeys() {
   const authStore = useAuthStore()
   const uiStore = useUiStore()
   const spotifyStore = useSpotifyStore()
+  const toast = useToast()
 
   // Power menu state
   const powerMenuVisible = ref(false)
@@ -116,6 +118,7 @@ export function useGlobalKeys() {
       // Only save if we have mappable content
       if (uiStore.mappableContent.id && uiStore.mappableContent.type) {
         saveButtonMapping(buttonNumber)
+        toast.success(`Saved to button ${buttonNumber}`)
 
         // Show the mapping overlay
         activePresetButton.value = buttonNumber

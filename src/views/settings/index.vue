@@ -15,7 +15,7 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const spotifyStore = useSpotifyStore()
-const { toggle, get } = useSettings()
+const { toggle, get, loadSettings } = useSettings()
 
 // Navigation state
 const currentView = ref<'main' | 'section'>('main')
@@ -68,7 +68,7 @@ const settingsStructure: Record<string, SettingSection> = {
         id: 'track-scrolling',
         title: 'Track Name Scrolling',
         type: 'toggle',
-        description: 'Enable or disable the scrolling animation for the track name in the player.',
+        description: 'Scroll long track names that don\'t fit on screen.',
         storageKey: 'trackNameScrollingEnabled',
         defaultValue: true,
       },
@@ -79,14 +79,6 @@ const settingsStructure: Record<string, SettingSection> = {
         description: 'Enable left/right swipe gestures to skip to the previous or next song.',
         storageKey: 'songChangeGestureEnabled',
         defaultValue: true,
-      },
-      {
-        id: 'elapsed-time',
-        title: 'Show Time Elapsed',
-        type: 'toggle',
-        description: 'Display the elapsed track time below the progress bar.',
-        storageKey: 'elapsedTimeEnabled',
-        defaultValue: false,
       },
       {
         id: 'dial-seek',
@@ -128,24 +120,6 @@ const settingsStructure: Record<string, SettingSection> = {
       },
     ],
   },
-  credits: {
-    title: 'Credits',
-    icon: 'C',
-    items: [
-      {
-        id: 'developers',
-        title: 'Developers',
-        type: 'credits',
-        names: ['Brandon Saldan', 'bbaovanc', 'Dominic Frye', 'shadow'],
-      },
-      {
-        id: 'contributors',
-        title: 'Contributors',
-        type: 'credits',
-        names: ['angelolz', 'EllEation', 'Jenner Gray', 'vakst', 'álvaro s', 'Justin Reynard'],
-      },
-    ],
-  },
   about: {
     title: 'About',
     icon: 'i',
@@ -162,6 +136,14 @@ const settingsStructure: Record<string, SettingSection> = {
     title: 'Debug',
     icon: 'D',
     items: [
+      {
+        id: 'debug-overlay',
+        title: 'Debug Overlay',
+        type: 'toggle',
+        description: 'Show debug logs overlay at bottom of screen.',
+        storageKey: 'debugOverlayEnabled',
+        defaultValue: false,
+      },
       {
         id: 'api-test',
         title: 'API Test Page',
@@ -241,7 +223,8 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadSettings()
   fetchProfile()
   window.addEventListener('keydown', handleKeyDown)
 })
@@ -261,8 +244,8 @@ const activeSectionData = computed(() => {
     <div class="min-h-full px-8 pt-8 pb-12">
       <!-- Main Settings List -->
       <div
-        class="transition-all duration-300 ease-out"
-        :class="currentView === 'main' ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0 absolute'"
+        v-if="currentView === 'main'"
+        class="transition-all duration-300 ease-out translate-x-0 opacity-100"
       >
         <h1 class="text-[46px] font-[580] text-white tracking-tight mb-6">Settings</h1>
 
@@ -288,8 +271,8 @@ const activeSectionData = computed(() => {
 
       <!-- Section Detail View -->
       <div
-        class="transition-all duration-300 ease-out"
-        :class="currentView === 'section' ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 absolute'"
+        v-if="currentView === 'section'"
+        class="transition-all duration-300 ease-out translate-x-0 opacity-100"
       >
         <div v-if="activeSectionData" class="space-y-6">
           <!-- Header with back button -->

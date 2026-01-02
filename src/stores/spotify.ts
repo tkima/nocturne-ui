@@ -3,11 +3,13 @@ import { ref } from 'vue'
 import { useAuthStore } from './auth'
 import type { Track, Album, Artist, Playlist } from '@/types'
 import { logger } from '@/utils/logger'
+import { createLogger } from '@/utils/debug'
 
 // ============================================================
 // Spotify API Store - API calls and data fetching
 // ============================================================
 
+const log = createLogger('Spotify')
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
 
 // Rate limiting: minimum time between API calls (ms)
@@ -290,13 +292,19 @@ export const useSpotifyStore = defineStore('spotify', () => {
         return apiRequest<T>(endpoint, options, retryCount + 1)
       }
 
-      // Handle auth errors - don't retry, need re-auth
+      // Handle auth errors - try to refresh token and retry once
       if (response.status === 401) {
+        logger.warn('Token expired (401), attempting refresh...')
+        const newToken = await authStore.ensureValidToken()
+        if (newToken && retryCount < 1) {
+          // Token refreshed, retry the request once
+          logger.info('Token refreshed, retrying request')
+          return apiRequest<T>(endpoint, options, retryCount + 1)
+        }
+        // Refresh failed or already retried - show error
         error.value = 'Authentication expired'
         retryError.value = 'Session expired - please log in again'
         needsRetry.value = true
-        // Try to refresh token
-        await authStore.ensureValidToken()
         return null
       }
 
@@ -367,6 +375,11 @@ export const useSpotifyStore = defineStore('spotify', () => {
     // Include additional_types=episode to get full episode data for podcasts
     const data = await apiRequest<SpotifyPlayback>('/me/player?additional_types=episode')
     if (data) {
+      // Log playback state to debug overlay
+      const trackName = data.item?.name || 'None'
+      const isPlaying = data.is_playing ? 'playing' : 'paused'
+      log.info(`Poll: ${trackName.slice(0, 20)}.. (${isPlaying})`)
+
       logger.info('Playback data', {
         type: data.currently_playing_type,
         itemName: data.item?.name,
@@ -388,11 +401,14 @@ export const useSpotifyStore = defineStore('spotify', () => {
           localStorage.setItem(`artist_cache_${trackId}`, artistName)
         }
       }
+    } else {
+      log.warn('Poll: No playback')
     }
     return data
   }
 
   async function play(options?: { context_uri?: string; uris?: string[]; offset?: { position: number } }) {
+    log.info(`Play${options ? ` (${options.context_uri || options.uris?.[0] || 'resume'})` : ''}`)
     await apiRequest('/me/player/play', {
       method: 'PUT',
       body: options ? JSON.stringify(options) : undefined,
@@ -400,10 +416,12 @@ export const useSpotifyStore = defineStore('spotify', () => {
   }
 
   async function pause() {
+    log.info('Pause')
     await apiRequest('/me/player/pause', { method: 'PUT' })
   }
 
   async function skipToNext() {
+    log.info('Skip Next')
     // Check if currently playing a podcast episode
     const playback = currentPlayback.value
     const isEpisode = playback?.currently_playing_type === 'episode'
@@ -453,10 +471,11 @@ export const useSpotifyStore = defineStore('spotify', () => {
   }
 
   async function skipToPrevious() {
+    log.info('Skip Previous')
     // If more than 3 seconds into track/episode, restart current
     const progress = currentPlayback.value?.progress_ms || 0
     if (progress > 3000) {
-      logger.info('Progress > 3s, seeking to start')
+      log.info('Progress > 3s, seeking to start')
       await seek(0)
       return
     }

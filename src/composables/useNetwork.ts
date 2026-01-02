@@ -1,4 +1,6 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
+import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+import { registerNetworkInit } from '@/utils/startup'
 
 // ============================================================
 // Network Connectivity Composable (Singleton)
@@ -9,17 +11,14 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 const NETWORK_CHECK_BYPASS_KEY = 'networkCheckBypass'
 const POLL_INTERVAL = 3000 // Poll every 3 seconds when not connected
-const SOFT_START_DELAY = 3000 // Wait 3 seconds before starting network checks
 
 // Singleton state - shared across all components
 const isConnected = ref<boolean | null>(null)
 const initialCheckDone = ref(false)
 const hasEverConnectedThisSession = ref(false)
 const isChecking = ref(false)
-const softStartComplete = ref(false)
 
 let pollIntervalId: ReturnType<typeof setInterval> | null = null
-let softStartTimeoutId: ReturnType<typeof setTimeout> | null = null
 let initialized = false
 let mountCount = 0
 
@@ -84,6 +83,9 @@ export function useNetwork() {
     // Dispatch events for other components
     if (connected && !wasConnected) {
       window.dispatchEvent(new Event('networkRestored'))
+      // Notify fast polling trigger
+      const { onInternetConnected } = useBluetoothTrigger()
+      onInternetConnected()
     }
   }
 
@@ -156,22 +158,17 @@ export function useNetwork() {
     startPolling()
   }
 
-  onMounted(() => {
-    mountCount++
+  // Register with centralized startup
+  if (!initialized) {
+    initialized = true
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
 
-    // Only initialize once (first mount)
-    if (!initialized) {
-      initialized = true
-      window.addEventListener('online', handleOnline)
-      window.addEventListener('offline', handleOffline)
-
-      // Soft start: delay initial network check to reduce startup load
-      softStartTimeoutId = setTimeout(() => {
-        softStartComplete.value = true
-        performInitialCheck()
-      }, SOFT_START_DELAY)
-    }
-  })
+    // Register init function - will be called by startup.ts
+    registerNetworkInit(() => {
+      performInitialCheck()
+    })
+  }
 
   onUnmounted(() => {
     mountCount--
@@ -179,14 +176,9 @@ export function useNetwork() {
     // Only cleanup when all components using this composable are unmounted
     if (mountCount === 0) {
       stopPolling()
-      if (softStartTimeoutId) {
-        clearTimeout(softStartTimeoutId)
-        softStartTimeoutId = null
-      }
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       initialized = false
-      softStartComplete.value = false
     }
   })
 

@@ -245,6 +245,27 @@ nocturne-vue/src/
   - Show network screen after 5 seconds of no connection
   - Long press (800ms) to forget device
 
+### Bluetooth Features
+
+When `VITE_BLUETOOTH_ENABLED=true` (default), the following features are active:
+
+| Feature | Description |
+|---------|-------------|
+| **Discovery** | Makes Car Thing visible as "Nocturne" so your phone can find and pair with it |
+| **Pairing UI** | Shows PIN code confirmation screen when a new device tries to pair |
+| **Auto-reconnect** | Automatically reconnects to last paired device on startup |
+| **Device list** | Shows paired/connected devices in Network Settings → Bluetooth |
+| **Connect/Disconnect** | Manual connect/disconnect buttons in Bluetooth settings |
+| **Forget device** | Long-press (800ms) to remove a paired device |
+| **Fast polling** | *(Optional)* When phone connects via BT, polls Spotify every 2s for 30s to detect playback faster. Useful when using iPhone with CarPlay - detects Spotify playback quicker after getting in the car. |
+| **Network polling** | After BT connect, polls to establish internet via iPhone Personal Hotspot |
+
+**Startup Timeline:**
+1. **0s** - App starts
+2. **5s** - Bluetooth initializes (soft start delay to reduce startup load)
+3. **5s+** - Discovery starts, WebSocket connects for events
+4. **5s+** - If previously paired device exists, tries auto-reconnect
+
 ## Environment Variables
 
 The app works out of the box with a shared Spotify Client ID (device auth flow). You only need to set environment variables if you want to use your own Client ID.
@@ -254,10 +275,14 @@ The app works out of the box with a shared Spotify Client ID (device auth flow).
 VITE_SPOTIFY_CLIENT_ID=your_32_char_client_id      # Your own Client ID
 VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php  # Your relay URL
 
+# Bluetooth (enabled by default)
+VITE_BLUETOOTH_ENABLED=true   # Set to false to disable all Bluetooth features
+
 # Default behavior (no .env needed):
 # - Uses shared Client ID: 65b708073fc0480ea92a077233ca87bd
 # - Uses Spotify Device Authorization flow (QR code scan)
 # - No relay server required
+# - Bluetooth enabled with discovery, pairing UI, fast polling
 ```
 
 ## API Endpoints

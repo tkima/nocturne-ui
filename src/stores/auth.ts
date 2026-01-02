@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSettings } from '@/composables/useSettings'
+import { createLogger } from '@/utils/debug'
+
+const log = createLogger('Auth')
 
 // ============================================================
 // Auth Store - Spotify Authentication (Device Auth + PKCE)
@@ -133,10 +136,14 @@ export const useAuthStore = defineStore('auth', () => {
    * Initialize auth state from localStorage and settings file
    */
   async function initFromStorage() {
+    log.info('initFromStorage called')
+
     // First try localStorage (fast, works in dev)
     const storedAccessToken = localStorage.getItem('spotifyAccessToken')
     const storedRefreshToken = localStorage.getItem('spotifyRefreshToken')
     const storedExpiry = localStorage.getItem('spotifyTokenExpiry')
+
+    log.info(`localStorage: access=${!!storedAccessToken}, refresh=${!!storedRefreshToken}`)
 
     if (storedAccessToken && storedRefreshToken) {
       accessToken.value = storedAccessToken
@@ -144,13 +151,17 @@ export const useAuthStore = defineStore('auth', () => {
       if (storedExpiry) {
         tokenExpiry.value = new Date(storedExpiry)
       }
+      log.success('Loaded from localStorage')
       return
     }
 
     // On device, try loading from settings.json (persists across reboots)
     if (!IS_DEV_MODE) {
+      log.info('Trying settings.json...')
       const { settings, loadSettings } = getSettings()
       await loadSettings()
+
+      log.info(`settings.json: access=${!!settings.value.accessToken}, refresh=${!!settings.value.refreshToken}`)
 
       if (settings.value.accessToken && settings.value.refreshToken) {
         accessToken.value = settings.value.accessToken
@@ -164,7 +175,9 @@ export const useAuthStore = defineStore('auth', () => {
         if (settings.value.tokenExpiry) {
           localStorage.setItem('spotifyTokenExpiry', settings.value.tokenExpiry)
         }
-        console.log('Loaded tokens from settings.json')
+        log.success('Loaded from settings.json')
+      } else {
+        log.warn('No tokens in settings.json')
       }
     }
   }
@@ -649,6 +662,7 @@ export const useAuthStore = defineStore('auth', () => {
     refresh_token?: string
     expires_in?: number
   }) {
+    log.info('saveTokens called')
     const expiryDate = new Date()
     expiryDate.setSeconds(expiryDate.getSeconds() + (tokens.expires_in || 3600) - 600)
 
@@ -667,25 +681,24 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Also save to settings.json (persists across reboots on device)
     if (!IS_DEV_MODE) {
+      log.info('Saving to settings.json...')
       const { set } = getSettings()
       await set('accessToken', tokens.access_token)
       await set('tokenExpiry', expiryDate.toISOString())
       if (tokens.refresh_token) {
         await set('refreshToken', tokens.refresh_token)
       }
-      console.log('Tokens saved to settings.json')
+      log.success('Tokens saved to settings.json')
     }
 
-    console.log('Tokens saved:', {
-      hasAccessToken: !!accessToken.value,
-      hasRefreshToken: !!refreshToken.value
-    })
+    log.success(`Tokens saved: access=${!!accessToken.value}, refresh=${!!refreshToken.value}`)
   }
 
   /**
    * Logout - clear all auth data
    */
   async function logout() {
+    log.warn('logout() called - clearing all tokens')
     accessToken.value = null
     refreshToken.value = null
     tokenExpiry.value = null
@@ -700,6 +713,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Also clear from settings.json
     if (!IS_DEV_MODE) {
+      log.warn('Clearing tokens from settings.json')
       const { set } = getSettings()
       await set('accessToken', null)
       await set('refreshToken', null)

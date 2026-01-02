@@ -19,6 +19,12 @@ import {
   RepeatIcon
 } from '@/components/common/icons'
 import { logger } from '@/utils/logger'
+import { createLogger } from '@/utils/debug'
+import { useToast } from '@/composables/useToast'
+import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+import { useSettings } from '@/composables/useSettings'
+
+const log = createLogger('Spotify')
 
 
 /* ============================================================
@@ -28,6 +34,9 @@ const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
+const toast = useToast()
+const { fastPollMode, stopFastPoll } = useBluetoothTrigger()
+const { settings } = useSettings()
 
 
 /* ============================================================
@@ -48,15 +57,19 @@ const pendingSeekPosition = ref<number | null>(null)
 let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
 // --- Swipe Gesture State ---
-const touchStartX = ref(0)
-const touchStartY = ref(0)
-const isSwiping = ref(false)
-const swipeThreshold = 50 // Minimum distance for swipe
+let touchStartX = 0 // Plain variable, no reactivity needed
+const swipeThreshold = 30 // Minimum distance for swipe
 const swipeAreaRef = ref<HTMLElement | null>(null)
 
 // --- Error Display State ---
 const showError = ref(false)
 let errorDelayTimeout: ReturnType<typeof setTimeout> | null = null
+
+// --- Marquee Scrolling State ---
+const trackNameRef = ref<HTMLElement | null>(null)
+const trackNameContainerRef = ref<HTMLElement | null>(null)
+const trackNameOverflow = ref(0) // How many pixels the text overflows
+
 
 
 /* ============================================================
@@ -103,6 +116,11 @@ const episodeContext = computed(() => spotifyStore.currentEpisodeContext)
    ============================================================ */
 
 const trackName = computed(() => playback.value?.item?.name || 'Not Playing')
+
+// Should we animate the track name with marquee?
+const shouldScrollTrackName = computed(() => {
+  return settings.value.trackNameScrollingEnabled && trackNameOverflow.value > 0
+})
 
 const artistName = computed(() => {
   // For episodes, show the show name
@@ -188,6 +206,17 @@ function formatTime(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+// Measure if track name overflows its container
+function measureTrackNameOverflow() {
+  if (!trackNameRef.value || !trackNameContainerRef.value) {
+    trackNameOverflow.value = 0
+    return
+  }
+  const textWidth = trackNameRef.value.scrollWidth
+  const containerWidth = trackNameContainerRef.value.clientWidth
+  trackNameOverflow.value = Math.max(0, textWidth - containerWidth)
 }
 
 const elapsedTime = computed(() => formatTime(playbackProgress.value))
@@ -293,12 +322,29 @@ function startPlaybackPolling() {
     // Always sync progress from server to prevent drift
     if (playback.value) {
       playbackProgress.value = playback.value.progress_ms || 0
+
+      // If we're in fast poll mode and got valid playback, stop fast polling
+      if (fastPollMode.value && artistName.value && artistName.value !== 'Unknown Artist') {
+        stopFastPoll()
+      }
     }
   }
 
   poll() // Initial poll
-  // 15s when playing (prevent drift), 5s when idle (detect changes faster)
-  playbackPollInterval = setInterval(poll, isPlaying.value ? 15000 : 5000)
+
+  // Determine poll interval:
+  // - Fast mode (Bluetooth just connected): 2s
+  // - Normal playing: 15s (prevent drift)
+  // - Normal idle: 5s (detect changes faster)
+  let interval = isPlaying.value ? 15000 : 5000
+  if (fastPollMode.value) {
+    interval = 2000
+    log.info('Poll interval: 2s (fast mode)')
+  } else {
+    log.info(`Poll interval: ${interval / 1000}s`)
+  }
+
+  playbackPollInterval = setInterval(poll, interval)
 }
 
 function stopPlaybackPolling() {
@@ -313,6 +359,19 @@ watch(isPlaying, () => {
   if (playbackPollInterval) {
     startPlaybackPolling()
   }
+})
+
+// Adjust polling frequency when Bluetooth fast poll mode changes
+watch(fastPollMode, () => {
+  if (playbackPollInterval) {
+    startPlaybackPolling()
+  }
+})
+
+// Measure track name overflow when track changes
+watch(trackName, () => {
+  // Wait for DOM update before measuring
+  setTimeout(measureTrackNameOverflow, 100)
 })
 
 
@@ -358,9 +417,11 @@ const handleToggleLike = createButtonHandler('Like', async () => {
   if (isLiked.value) {
     await spotifyStore.removeTrack(trackId)
     isLiked.value = false
+    toast.success('Removed from Liked Songs')
   } else {
     await spotifyStore.saveTrack(trackId)
     isLiked.value = true
+    toast.success('Added to Liked Songs')
   }
 }, 500)
 
@@ -455,39 +516,24 @@ function handleWheel(e: WheelEvent) {
 
 /* ============================================================
    SWIPE GESTURES (next/previous track)
+   Simplified: touchstart + touchend only, no touchmove overhead
    ============================================================ */
 
 function handleTouchStart(e: TouchEvent) {
   const touch = e.touches[0]
-  if (!touch) return
-  touchStartX.value = touch.clientX
-  touchStartY.value = touch.clientY
-  isSwiping.value = false
-}
-
-function handleTouchMove(e: TouchEvent) {
-  if (touchStartX.value === 0) return
-  const touch = e.touches[0]
-  if (!touch) return
-
-  const deltaX = touch.clientX - touchStartX.value
-  const deltaY = touch.clientY - touchStartY.value
-
-  // If horizontal movement is greater than vertical, it's a swipe
-  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 20) {
-    isSwiping.value = true
-    e.preventDefault() // Prevent scroll during horizontal swipe
+  if (touch) {
+    touchStartX = touch.clientX
   }
 }
 
 function handleTouchEnd(e: TouchEvent) {
-  if (touchStartX.value === 0) return
   const touch = e.changedTouches[0]
   if (!touch) return
 
-  const deltaX = touch.clientX - touchStartX.value
+  const deltaX = touch.clientX - touchStartX
+  touchStartX = 0
 
-  // Simple check: if moved more than threshold horizontally
+  // Fire skip if moved more than threshold
   if (Math.abs(deltaX) > swipeThreshold) {
     if (deltaX < 0) {
       handleSkipNext() // Swipe left -> next track
@@ -495,11 +541,6 @@ function handleTouchEnd(e: TouchEvent) {
       handleSkipPrevious() // Swipe right -> previous track
     }
   }
-
-  // Reset
-  touchStartX.value = 0
-  touchStartY.value = 0
-  isSwiping.value = false
 }
 
 
@@ -515,9 +556,9 @@ onMounted(async () => {
   // Attach swipe listeners
   if (swipeAreaRef.value) {
     swipeAreaRef.value.addEventListener('touchstart', handleTouchStart, { passive: true })
-    swipeAreaRef.value.addEventListener('touchmove', handleTouchMove, { passive: false })
-    swipeAreaRef.value.addEventListener('touchend', handleTouchEnd)
+    swipeAreaRef.value.addEventListener('touchend', handleTouchEnd, { passive: true })
   }
+
 
   // Initialize playback
   authStore.initFromStorage()
@@ -561,7 +602,6 @@ onUnmounted(() => {
   // Remove swipe listeners
   if (swipeAreaRef.value) {
     swipeAreaRef.value.removeEventListener('touchstart', handleTouchStart)
-    swipeAreaRef.value.removeEventListener('touchmove', handleTouchMove)
     swipeAreaRef.value.removeEventListener('touchend', handleTouchEnd)
   }
 })
@@ -577,9 +617,10 @@ onUnmounted(() => {
         <p class="text-white text-[24px] font-[560]">{{ retryError }}</p>
       </div>
 
-      <!-- Album Art and Track Info (swipeable for next/prev) -->
+      <!-- Swipeable area for next/prev (covers album art, track info, and progress bar) -->
+      <div ref="swipeAreaRef" class="flex-1">
+      <!-- Album Art and Track Info -->
       <div
-        ref="swipeAreaRef"
         class="md:w-1/3 flex flex-row items-center px-12 pt-10"
       >
         <!-- Album/Show Art (clickable to show track/episode list) -->
@@ -606,10 +647,22 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Track Info -->
-        <div class="flex-1 text-center md:text-left">
-          <div class="max-w-[400px]">
-            <h2 class="text-[40px] font-[580] text-white tracking-tight truncate">
+        <!-- Track Info (clickable to show album/show) -->
+        <div
+          class="flex-1 text-center md:text-left"
+          :class="(albumId || showId) ? 'cursor-pointer' : ''"
+          @click="handleArtClick"
+        >
+          <div ref="trackNameContainerRef" class="max-w-[400px] overflow-hidden">
+            <h2
+              ref="trackNameRef"
+              class="text-[40px] font-[580] text-white tracking-tight whitespace-nowrap"
+              :class="shouldScrollTrackName ? '' : 'truncate'"
+              :style="shouldScrollTrackName ? {
+                animation: 'marquee 8s linear infinite',
+                '--final-position': `-${trackNameOverflow}px`
+              } : {}"
+            >
               {{ trackName }}
             </h2>
           </div>
@@ -634,10 +687,11 @@ onUnmounted(() => {
           <span>{{ remainingTime }}</span>
         </div>
       </div>
+      </div>
 
       <!-- Player Controls -->
       <div
-        class="flex justify-between items-center w-full px-12 mt-1 transition-all duration-200 ease-in-out"
+        class="flex justify-between items-center w-full px-12 mt-1 pb-10 transition-all duration-200 ease-in-out"
         :class="isProgressScrubbing ? 'translate-y-24 opacity-0' : 'translate-y-0 opacity-100'"
       >
         <!-- Like Button -->

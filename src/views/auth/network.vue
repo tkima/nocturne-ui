@@ -20,8 +20,10 @@ import {
 } from '@/components/common/icons'
 import Keyboard from 'simple-keyboard'
 import 'simple-keyboard/build/css/index.css'
+import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
+const toast = useToast()
 const uiStore = useUiStore()
 const authStore = useAuthStore()
 
@@ -91,6 +93,11 @@ function navigateTo(screen: Screen) {
   } else if (screen === 'wifi' || screen === 'bluetooth') {
     networkClasses.value = '-translate-x-full opacity-0'
     subpageClasses.value = 'translate-x-0 opacity-100'
+
+    // When entering Bluetooth screen, start discovery on-demand
+    if (screen === 'bluetooth') {
+      bluetooth.initOnDemand()
+    }
   }
 
   setTimeout(() => {
@@ -137,9 +144,12 @@ async function handleNetworkClick(netw: { ssid: string; flags: string }) {
     // Open network - connect and trigger network check
     const success = await wifi.connectToNetwork(netw.ssid)
     if (success) {
+      toast.success(`Connected to ${netw.ssid}`)
       setTimeout(async () => {
         await network.refresh()
       }, 1500)
+    } else {
+      toast.error('Connection failed')
     }
   }
 }
@@ -159,6 +169,7 @@ async function handlePasswordSubmit() {
   )
 
   if (success) {
+    toast.success(`Connected to ${selectedNetwork.value.ssid}`)
     showPasswordModal.value = false
     selectedNetwork.value = null
     passwordInput.value = ''
@@ -169,6 +180,7 @@ async function handlePasswordSubmit() {
     }, 1500)
   } else {
     // Show error and keyboard again on failure
+    toast.error('Wrong password')
     passwordError.value = wifi.error.value || 'Connection failed'
     showKeyboard.value = true
   }
@@ -314,7 +326,9 @@ function handleWifiPressEnd() {
 async function handleForgetWifi() {
   if (wifiToForget.value?.networkId === undefined) return
 
+  const ssid = wifiToForget.value.ssid
   await wifi.forgetNetwork(wifiToForget.value.networkId)
+  toast.success(`Forgot ${ssid}`)
   showForgetWifiModal.value = false
   wifiToForget.value = null
 }
@@ -327,11 +341,20 @@ function handleCancelForgetWifi() {
 // ------------------------------------------------------------
 // Bluetooth Actions
 // ------------------------------------------------------------
-function handleBluetoothClick(device: { address: string; connected: boolean }) {
+async function handleBluetoothClick(device: { address: string; name: string; connected: boolean }) {
   if (device.connected) {
-    bluetooth.disconnectDevice(device.address)
+    const success = await bluetooth.disconnectDevice(device.address)
+    if (success) {
+      toast.info(`Disconnected from ${device.name}`)
+    }
   } else {
-    bluetooth.connectDevice(device.address)
+    toast.info(`Connecting to ${device.name}...`)
+    const success = await bluetooth.connectDevice(device.address)
+    if (success) {
+      toast.success(`Connected to ${device.name}`)
+    } else {
+      toast.error('Connection failed')
+    }
   }
 }
 
@@ -353,7 +376,9 @@ function handleDevicePressEnd() {
 async function handleForgetDevice() {
   if (!deviceToForget.value) return
 
+  const name = deviceToForget.value.name
   await bluetooth.forgetDevice(deviceToForget.value.address)
+  toast.success(`Forgot ${name}`)
   showForgetModal.value = false
   deviceToForget.value = null
 }

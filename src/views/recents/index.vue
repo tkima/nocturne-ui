@@ -2,13 +2,17 @@
      Recents View - Recently played albums and playlists
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
+import { createLogger } from '@/utils/debug'
+import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+
+const log = createLogger('Spotify')
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -16,6 +20,12 @@ import { logger } from '@/utils/logger'
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const { fastPollMode } = useBluetoothTrigger()
+
+// ------------------------------------------------------------
+// Polling State
+// ------------------------------------------------------------
+let playbackPollInterval: ReturnType<typeof setInterval> | null = null
 
 // ------------------------------------------------------------
 // Computed
@@ -83,6 +93,41 @@ function handleSubtitleClick(item: { id: string; type: 'album' | 'playlist' }) {
 }
 
 // ------------------------------------------------------------
+// Polling - Keep playback state in sync
+// ------------------------------------------------------------
+function startPlaybackPolling() {
+  stopPlaybackPolling()
+
+  const poll = async () => {
+    if (!authStore.isAuthenticated) return
+    await spotifyStore.fetchCurrentPlayback()
+  }
+
+  // Run poll immediately
+  poll()
+
+  // Determine poll interval:
+  // - Fast mode (Bluetooth just connected): 2s
+  // - Normal: 10s (recents doesn't need as frequent updates)
+  let interval = 10000
+  if (fastPollMode.value) {
+    interval = 2000
+    log.info('Poll interval: 2s (fast mode)')
+  } else {
+    log.info(`Poll interval: ${interval / 1000}s`)
+  }
+
+  playbackPollInterval = setInterval(poll, interval)
+}
+
+function stopPlaybackPolling() {
+  if (playbackPollInterval) {
+    clearInterval(playbackPollInterval)
+    playbackPollInterval = null
+  }
+}
+
+// ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
 onMounted(async () => {
@@ -94,7 +139,14 @@ onMounted(async () => {
       spotifyStore.fetchUserPlaylists(),
       spotifyStore.fetchCurrentPlayback()
     ])
+
+    // Start polling
+    startPlaybackPolling()
   }
+})
+
+onUnmounted(() => {
+  stopPlaybackPolling()
 })
 </script>
 

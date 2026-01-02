@@ -1,8 +1,14 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { useConfigStore } from '@/stores/config'
+import { useSettings } from '@/composables/useSettings'
+import { createLogger } from '@/utils/debug'
+import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+import { registerBluetoothInit, registerPresenceInit } from '@/utils/startup'
 
 // Check if Bluetooth is enabled via environment variable
 const BLUETOOTH_ENABLED = import.meta.env.VITE_BLUETOOTH_ENABLED !== 'false'
+
+const log = createLogger('BT')
 
 export interface BluetoothDevice {
   address: string
@@ -18,141 +24,308 @@ export interface PairingRequest {
   pairingKey: string
 }
 
-// Reconnection constants
-const RECONNECT_INTERVAL = 2000 // 2 seconds - keep trying forever
-const INITIAL_RECONNECT_DELAY = 1000
-const SHOW_NETWORK_SCREEN_DELAY = 5000 // Show network screen after 5 seconds of no connection
-const NETWORK_POLL_INTERVAL = 5000 // Poll network connection every 5 seconds
-const SOFT_START_DELAY = 5000 // Wait 5 seconds before starting Bluetooth (staggered after network)
+// Script path for bt-connect.sh (deployed to /etc/nocturne/ui/)
+const BT_CONNECT_SCRIPT = '/etc/nocturne/ui/bt-connect.sh'
+
+// ============================================================
+// SINGLETON STATE - shared across all components
+// ============================================================
+const devices = ref<BluetoothDevice[]>([])
+const isLoading = ref(false)
+const isConnecting = ref(false)
+const error = ref<string | null>(null)
+const discoveryActive = ref(false)
+const reconnectAttempt = ref(0) // Kept for API compat
+const isReconnecting = ref(false)
+const shouldShowNetworkScreen = ref(false)
+const pairingRequest = ref<PairingRequest | null>(null)
+const wsConnected = ref(false)
+
+// Internal singleton state
+let ws: WebSocket | null = null
+let wsReconnectTimeout: ReturnType<typeof setTimeout> | null = null
+let reconnectLoopRunning = false
+let initStarted = false  // Singleton init flag
+let presenceCheckInterval: ReturnType<typeof setInterval> | null = null
+let devicePresent = false  // Track if saved device is nearby
 
 export function useBluetooth() {
   const config = useConfigStore()
+  const { get: getSetting, set: setSetting, loadSettings } = useSettings()
+  const { setBtPresent } = useBluetoothTrigger()
 
-  const devices = ref<BluetoothDevice[]>([])
-  const isLoading = ref(false)
-  const isConnecting = ref(false)
-  const error = ref<string | null>(null)
-  const discoveryActive = ref(false)
-  const reconnectAttempt = ref(0)
-  const isReconnecting = ref(false)
-  const shouldShowNetworkScreen = ref(false)
+  // ============================================================
+  // CORE API FUNCTIONS
+  // ============================================================
 
-  // Pairing state
-  const pairingRequest = ref<PairingRequest | null>(null)
-  const wsConnected = ref(false)
-
-  let reconnectTimeoutRef: ReturnType<typeof setTimeout> | null = null
-  let networkScreenTimeoutRef: ReturnType<typeof setTimeout> | null = null
-  let networkPollIntervalRef: ReturnType<typeof setInterval> | null = null
-  let softStartTimeoutRef: ReturnType<typeof setTimeout> | null = null
-  let ws: WebSocket | null = null
-  let wsReconnectTimeout: ReturnType<typeof setTimeout> | null = null
-
-  // Fetch paired devices
   async function fetchDevices(): Promise<BluetoothDevice[]> {
-    isLoading.value = true
-    error.value = null
-
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
-
       const response = await fetch(`${config.nocturnedUrl}/bluetooth/devices`, {
         signal: controller.signal
       })
       clearTimeout(timeoutId)
-
       if (!response.ok) throw new Error('Failed to fetch devices')
-
       const data: BluetoothDevice[] = await response.json()
       devices.value = data
       return data
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch devices'
       return []
-    } finally {
-      isLoading.value = false
     }
   }
 
-  // Start Bluetooth discovery
   async function startDiscovery(): Promise<boolean> {
     if (discoveryActive.value) return true
-
     try {
-      const response = await fetch(`${config.nocturnedUrl}/bluetooth/discover/on`, {
-        method: 'POST'
-      })
-
+      const response = await fetch(`${config.nocturnedUrl}/bluetooth/discover/on`, { method: 'POST' })
       if (!response.ok) throw new Error('Failed to start discovery')
-
       discoveryActive.value = true
       return true
-    } catch (err) {
-      console.error('Failed to start discovery:', err)
+    } catch {
       return false
     }
   }
 
-  // Stop Bluetooth discovery
   async function stopDiscovery(): Promise<void> {
     if (!discoveryActive.value) return
+    try {
+      await fetch(`${config.nocturnedUrl}/bluetooth/discover/off`, { method: 'POST' })
+      discoveryActive.value = false
+    } catch { /* ignore */ }
+  }
+
+  // ============================================================
+  // SIMPLE RECONNECT FLOW
+  // ============================================================
+
+  /**
+   * Try to connect to saved device once.
+   * Presence detection loop handles retries.
+   */
+  async function reconnect(): Promise<boolean> {
+    const savedAddress = getSetting('lastBluetoothDevice')
+    if (!savedAddress) {
+      log.warn('No saved device')
+      return false
+    }
+    log.info(`Connecting to ${savedAddress.slice(-8)}...`)
+
+    // Check if already connected
+    const deviceList = await fetchDevices()
+    if (deviceList.some(d => d.address === savedAddress && d.connected)) {
+      log.success('Already connected')
+      return true
+    }
+
+    // Try to connect using bt-connect.sh
+    isConnecting.value = true
 
     try {
-      await fetch(`${config.nocturnedUrl}/bluetooth/discover/off`, {
-        method: 'POST'
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 45000)
+
+      // Use bt-connect.sh script which deletes NAP profile before connecting
+      const response = await fetch(`${config.nocturnedUrl}/device/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [`${BT_CONNECT_SCRIPT} ${savedAddress}`]
+        }),
+        signal: controller.signal
       })
-      discoveryActive.value = false
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        log.error(`Script call failed: HTTP ${response.status}`)
+        isConnecting.value = false
+        return false
+      }
+
+      const result = await response.json()
+      const cmdResult = result.results?.[0]
+
+      if (cmdResult?.exit_code === 0) {
+        log.success('Connected!')
+        isConnecting.value = false
+        await fetchDevices()
+        return true
+      }
+
+      // Script failed, check if connected anyway
+      log.warn(`Script exit ${cmdResult?.exit_code}, verifying...`)
+      isConnecting.value = false
+      const deviceList = await fetchDevices()
+      const isConnected = deviceList.some(d => d.address === savedAddress && d.connected)
+      if (isConnected) {
+        log.success('Verified: BT is connected!')
+        return true
+      }
+
+      log.error(`Connect failed: ${cmdResult?.output || 'unknown'}`)
+      return false
+
     } catch (err) {
-      console.error('Failed to stop discovery:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error(`Connect error: ${msg}`)
+      isConnecting.value = false
+      return false
     }
   }
 
-  // Connect to a device
+  /**
+   * Attempt reconnect once. Presence loop handles retries.
+   */
+  async function startReconnectLoop(): Promise<void> {
+    if (reconnectLoopRunning) return
+
+    reconnectLoopRunning = true
+    isReconnecting.value = true
+
+    const success = await reconnect()
+    if (success) {
+      devicePresent = true
+      setBtPresent(true)
+    }
+
+    reconnectLoopRunning = false
+    isReconnecting.value = false
+  }
+
+  function stopReconnecting() {
+    isReconnecting.value = false
+  }
+
+  // ============================================================
+  // PRESENCE DETECTION - Lightweight polling to detect device nearby
+  // ============================================================
+
+  /**
+   * Check if saved device is in discovery list (nearby)
+   * Returns true if device found, false otherwise
+   */
+  async function checkPresence(): Promise<boolean> {
+    const savedAddress = getSetting('lastBluetoothDevice')
+    if (!savedAddress) return false
+
+    const deviceList = await fetchDevices()
+    return deviceList.some(d => d.address === savedAddress)
+  }
+
+  /**
+   * Start presence detection loop
+   * - Check every 2s when device not present
+   * - Check every 5min when device is present
+   */
+  function startPresenceLoop() {
+    if (presenceCheckInterval) return // Already running
+
+    log.info('Starting presence detection')
+
+    const runCheck = async () => {
+      const found = await checkPresence()
+
+      if (found && !devicePresent) {
+        // Device just appeared - trigger reconnect
+        log.success('Device appeared - triggering reconnect')
+        devicePresent = true
+        setBtPresent(true)
+        startReconnectLoop()
+      } else if (!found && devicePresent) {
+        // Device disappeared
+        log.warn('Device gone')
+        devicePresent = false
+        setBtPresent(false)
+      }
+
+      // Schedule next check: 3s if not present, 5min if present
+      const nextDelay = devicePresent ? 300000 : 3000
+      presenceCheckInterval = setTimeout(runCheck, nextDelay)
+    }
+
+    // Start first check after 5min (give initial reconnect time to work)
+    presenceCheckInterval = setTimeout(runCheck, 300000)
+  }
+
+  function _stopPresenceLoop() {
+    if (presenceCheckInterval) {
+      clearTimeout(presenceCheckInterval)
+      presenceCheckInterval = null
+    }
+  }
+  // Keep reference to avoid unused warning
+  void _stopPresenceLoop
+
+  // ============================================================
+  // DEVICE ACTIONS
+  // ============================================================
+
   async function connectDevice(address: string): Promise<boolean> {
+    log.info(`Manual connect to ${address.slice(-8)}`)
     isConnecting.value = true
     error.value = null
 
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      const timeoutId = setTimeout(() => controller.abort(), 45000)
 
-      const response = await fetch(`${config.nocturnedUrl}/bluetooth/connect/${address}`, {
+      // Use bt-connect.sh script which deletes NAP profile before connecting
+      const response = await fetch(`${config.nocturnedUrl}/device/exec`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [`${BT_CONNECT_SCRIPT} ${address}`]
+        }),
         signal: controller.signal
       })
       clearTimeout(timeoutId)
 
-      if (!response.ok) throw new Error('Failed to connect')
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
 
-      const data = await response.json().catch(() => ({}))
-      if (data.connected) {
-        localStorage.setItem('lastConnectedBluetoothDevice', address)
+      const result = await response.json()
+      const cmdResult = result.results?.[0]
+
+      if (cmdResult?.exit_code === 0) {
+        log.success('Connected!')
+        await setSetting('lastBluetoothDevice', address)
         await fetchDevices()
-        // Start network polling to establish NAP connection
-        startNetworkPolling(address)
         return true
       }
 
-      throw new Error('Connection failed')
+      // Script failed, check if connected anyway
+      log.warn(`Script exit ${cmdResult?.exit_code}, verifying...`)
+      const deviceList = await fetchDevices()
+      const isConnected = deviceList.some(d => d.address === address && d.connected)
+      if (isConnected) {
+        log.success('Verified: BT is connected!')
+        await setSetting('lastBluetoothDevice', address)
+        return true
+      }
+
+      error.value = 'Connection failed'
+      log.error(`Connect failed: ${cmdResult?.output || 'unknown'}`)
+      return false
+
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Connection failed'
+      const msg = err instanceof Error ? err.message : 'Failed'
+      log.error(`Connect failed: ${msg}`)
+      error.value = msg
       return false
     } finally {
       isConnecting.value = false
     }
   }
 
-  // Disconnect a device
   async function disconnectDevice(address: string): Promise<boolean> {
     try {
       const response = await fetch(`${config.nocturnedUrl}/bluetooth/disconnect/${address}`, {
         method: 'POST'
       })
-
       if (!response.ok) throw new Error('Failed to disconnect')
-
-      localStorage.removeItem('lastConnectedBluetoothDevice')
+      await setSetting('lastBluetoothDevice', null)
       await fetchDevices()
       return true
     } catch (err) {
@@ -161,21 +334,16 @@ export function useBluetooth() {
     }
   }
 
-  // Forget/unpair a device
   async function forgetDevice(address: string): Promise<boolean> {
     isLoading.value = true
-
     try {
       const response = await fetch(`${config.nocturnedUrl}/bluetooth/remove/${address}`, {
         method: 'POST'
       })
-
       if (!response.ok) throw new Error('Failed to remove device')
-
-      if (localStorage.getItem('lastConnectedBluetoothDevice') === address) {
-        localStorage.removeItem('lastConnectedBluetoothDevice')
+      if (getSetting('lastBluetoothDevice') === address) {
+        await setSetting('lastBluetoothDevice', null)
       }
-
       await fetchDevices()
       return true
     } catch (err) {
@@ -186,320 +354,22 @@ export function useBluetooth() {
     }
   }
 
-  // Cleanup reconnect timer
-  function cleanupReconnectTimer() {
-    if (reconnectTimeoutRef) {
-      clearTimeout(reconnectTimeoutRef)
-      reconnectTimeoutRef = null
-    }
-  }
+  // ============================================================
+  // PAIRING
+  // ============================================================
 
-  // Cleanup network screen timer
-  function cleanupNetworkScreenTimer() {
-    if (networkScreenTimeoutRef) {
-      clearTimeout(networkScreenTimeoutRef)
-      networkScreenTimeoutRef = null
-    }
-  }
-
-  // Check if any device is connected
-  function hasConnectedDevice(): boolean {
-    return devices.value.some(d => d.connected)
-  }
-
-  // Start the network screen timer (shows after 5 seconds of no connection)
-  function startNetworkScreenTimer() {
-    cleanupNetworkScreenTimer()
-    networkScreenTimeoutRef = setTimeout(() => {
-      if (!hasConnectedDevice()) {
-        shouldShowNetworkScreen.value = true
-      }
-    }, SHOW_NETWORK_SCREEN_DELAY)
-  }
-
-  // Attempt to reconnect to last connected device - runs forever until connected
-  async function attemptReconnect(): Promise<void> {
-    // Don't start another attempt if one is in progress
-    if (isReconnecting.value) {
-      return
-    }
-
-    const lastDeviceAddress = localStorage.getItem('lastConnectedBluetoothDevice')
-    if (!lastDeviceAddress) {
-      cleanupReconnectTimer()
-      reconnectAttempt.value = 0
-      isReconnecting.value = false
-      return
-    }
-
-    try {
-      isReconnecting.value = true
-
-      // First check if already connected
-      const devicesData = await fetchDevices()
-      const isAlreadyConnected = devicesData.some(
-        device => device.address === lastDeviceAddress && device.connected
-      )
-
-      if (isAlreadyConnected) {
-        // Connected! Stop everything
-        cleanupReconnectTimer()
-        cleanupNetworkScreenTimer()
-        reconnectAttempt.value = 0
-        isReconnecting.value = false
-        shouldShowNetworkScreen.value = false
-        console.log('Device connected')
-        return
-      }
-
-      reconnectAttempt.value++
-      console.log(`Reconnect attempt ${reconnectAttempt.value} to ${lastDeviceAddress}`)
-
-      // Attempt to connect
-      const success = await connectDevice(lastDeviceAddress)
-
-      if (success) {
-        // Connected! Stop everything
-        cleanupReconnectTimer()
-        cleanupNetworkScreenTimer()
-        reconnectAttempt.value = 0
-        isReconnecting.value = false
-        shouldShowNetworkScreen.value = false
-        console.log('Reconnection successful')
-        return
-      }
-
-      // Schedule next attempt - keep trying forever
-      isReconnecting.value = false
-      reconnectTimeoutRef = setTimeout(() => {
-        reconnectTimeoutRef = null
-        attemptReconnect()
-      }, RECONNECT_INTERVAL)
-    } catch (err) {
-      console.error('Reconnect attempt failed:', err)
-      reconnectAttempt.value++
-
-      // Schedule next attempt - keep trying forever
-      isReconnecting.value = false
-      reconnectTimeoutRef = setTimeout(() => {
-        reconnectTimeoutRef = null
-        attemptReconnect()
-      }, RECONNECT_INTERVAL)
-    }
-  }
-
-  // Stop reconnection loop
-  function stopReconnecting() {
-    cleanupReconnectTimer()
-    cleanupNetworkScreenTimer()
-    isReconnecting.value = false
-    reconnectAttempt.value = 0
-  }
-
-  // ------------------------------------------------------------
-  // Network Polling - establishes NAP connection after BT pairing
-  // ------------------------------------------------------------
-  function stopNetworkPolling() {
-    if (networkPollIntervalRef) {
-      clearInterval(networkPollIntervalRef)
-      networkPollIntervalRef = null
-    }
-  }
-
-  async function startNetworkPolling(deviceAddress: string) {
-    if (!deviceAddress) return
-
-    stopNetworkPolling()
-    console.log('Starting network polling for device:', deviceAddress)
-
-    // Attempt to establish network connection
-    const attemptNetworkConnection = async (): Promise<boolean> => {
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-        const response = await fetch(`${config.nocturnedUrl}/bluetooth/connect/${deviceAddress}`, {
-          method: 'POST',
-          signal: controller.signal
-        })
-        clearTimeout(timeoutId)
-
-        if (response.ok) {
-          const data = await response.json().catch(() => ({}))
-          if (data.connected) {
-            console.log('Network connection established successfully')
-            stopNetworkPolling()
-            // Trigger network check
-            window.dispatchEvent(new Event('online'))
-            return true
-          }
-        } else {
-          // Check for "exit status 4" which means network connect failed
-          // This happens when iPhone Personal Hotspot isn't enabled yet
-          const errorData = await response.json().catch(() => ({}))
-          console.log('Network connect response:', errorData.error || 'Failed')
-          // Keep retrying - the user might enable Personal Hotspot
-        }
-      } catch (err) {
-        console.log('Network connection attempt failed, will retry...')
-      }
-      return false
-    }
-
-    // Try immediately
-    const success = await attemptNetworkConnection()
-    if (success) return
-
-    // Then poll every 5 seconds - keep trying until hotspot is enabled
-    networkPollIntervalRef = setInterval(async () => {
-      const success = await attemptNetworkConnection()
-      if (success) {
-        stopNetworkPolling()
-      }
-    }, NETWORK_POLL_INTERVAL)
-  }
-
-  // ------------------------------------------------------------
-  // WebSocket for pairing requests
-  // ------------------------------------------------------------
-  function connectWebSocket() {
-    if (ws && ws.readyState === WebSocket.OPEN) return
-
-    try {
-      // nocturned WebSocket endpoint
-      const wsUrl = config.nocturnedUrl.replace('http', 'ws') + '/ws'
-      ws = new WebSocket(wsUrl)
-
-      ws.onopen = () => {
-        wsConnected.value = true
-        console.log('Bluetooth WebSocket connected')
-      }
-
-      ws.onclose = () => {
-        wsConnected.value = false
-        console.log('Bluetooth WebSocket disconnected')
-        // Reconnect after delay
-        wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
-      }
-
-      ws.onerror = (err) => {
-        console.error('Bluetooth WebSocket error:', err)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          handleWsMessage(data)
-        } catch (err) {
-          console.error('Failed to parse WebSocket message:', err)
-        }
-      }
-    } catch (err) {
-      console.error('Failed to connect WebSocket:', err)
-      wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
-    }
-  }
-
-  function handleWsMessage(data: { type: string; payload?: unknown }) {
-    const payload = data.payload as { address?: string; device?: { address: string } } | undefined
-
-    switch (data.type) {
-      case 'bluetooth\\pairing':
-      case 'bluetooth/pairing':
-        pairingRequest.value = data.payload as PairingRequest
-        break
-
-      case 'bluetooth\\paired':
-      case 'bluetooth/paired':
-        pairingRequest.value = null
-        // Store last connected device and start network polling
-        if (payload?.device?.address) {
-          localStorage.setItem('lastConnectedBluetoothDevice', payload.device.address)
-          // Start network polling after a short delay to let BT settle
-          setTimeout(() => {
-            startNetworkPolling(payload.device!.address)
-          }, 2000)
-        }
-        // Refresh devices after pairing
-        fetchDevices()
-        break
-
-      case 'bluetooth\\connect':
-      case 'bluetooth/connect':
-        // Device connected, start network polling
-        if (payload?.address) {
-          startNetworkPolling(payload.address)
-          cleanupReconnectTimer()
-          reconnectAttempt.value = 0
-          isReconnecting.value = false
-        }
-        fetchDevices()
-        break
-
-      case 'bluetooth\\disconnected':
-      case 'bluetooth/disconnected':
-      case 'bluetooth\\disconnect':
-      case 'bluetooth/disconnect':
-        // Device disconnected, stop polling and refresh list
-        stopNetworkPolling()
-        fetchDevices()
-        // Try to reconnect
-        setTimeout(() => attemptReconnect(), INITIAL_RECONNECT_DELAY)
-        break
-
-      case 'bluetooth\\network\\disconnect':
-      case 'bluetooth/network/disconnect':
-        // Network disconnected but BT still connected, try reconnecting
-        setTimeout(() => attemptReconnect(), INITIAL_RECONNECT_DELAY)
-        break
-
-      case 'network_status':
-        if ((payload as { status?: string })?.status === 'online') {
-          cleanupReconnectTimer()
-          reconnectAttempt.value = 0
-          isReconnecting.value = false
-          stopNetworkPolling()
-        }
-        break
-    }
-  }
-
-  function closeWebSocket() {
-    if (wsReconnectTimeout) {
-      clearTimeout(wsReconnectTimeout)
-      wsReconnectTimeout = null
-    }
-    if (ws) {
-      ws.close()
-      ws = null
-    }
-    wsConnected.value = false
-  }
-
-  // ------------------------------------------------------------
-  // Pairing Actions
-  // ------------------------------------------------------------
   async function acceptPairing(): Promise<boolean> {
     if (!pairingRequest.value) return false
-
     try {
       isConnecting.value = true
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
-
       const response = await fetch(`${config.nocturnedUrl}/bluetooth/pairing/accept`, {
-        method: 'POST',
-        signal: controller.signal
+        method: 'POST'
       })
-      clearTimeout(timeoutId)
-
       if (!response.ok) throw new Error('Failed to accept pairing')
-
       pairingRequest.value = null
       await fetchDevices()
       return true
-    } catch (err) {
-      console.error('Error accepting pairing:', err)
+    } catch {
       pairingRequest.value = null
       return false
     } finally {
@@ -509,80 +379,151 @@ export function useBluetooth() {
 
   async function denyPairing(): Promise<boolean> {
     if (!pairingRequest.value) return false
-
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000)
-
-      const response = await fetch(`${config.nocturnedUrl}/bluetooth/pairing/deny`, {
-        method: 'POST',
-        signal: controller.signal
-      })
-      clearTimeout(timeoutId)
-
-      if (!response.ok) throw new Error('Failed to deny pairing')
-
+      await fetch(`${config.nocturnedUrl}/bluetooth/pairing/deny`, { method: 'POST' })
       pairingRequest.value = null
       return true
-    } catch (err) {
-      console.error('Error denying pairing:', err)
+    } catch {
       pairingRequest.value = null
       return false
     }
   }
 
-  // Initialize
-  async function init() {
-    // Skip initialization if Bluetooth is disabled
-    if (!BLUETOOTH_ENABLED) {
-      console.log('Bluetooth disabled via VITE_BLUETOOTH_ENABLED=false')
-      return
+  // ============================================================
+  // WEBSOCKET - Just for pairing events, not for reconnect logic
+  // ============================================================
+
+  function connectWebSocket() {
+    if (ws && ws.readyState === WebSocket.OPEN) return
+
+    // Clear any pending reconnect
+    if (wsReconnectTimeout) {
+      clearTimeout(wsReconnectTimeout)
+      wsReconnectTimeout = null
     }
 
-    connectWebSocket()
-    await startDiscovery()
-    await fetchDevices()
+    try {
+      const wsUrl = config.nocturnedUrl.replace('http', 'ws') + '/ws'
+      ws = new WebSocket(wsUrl)
 
-    // Check if we need to reconnect to last device
-    const lastDeviceAddress = localStorage.getItem('lastConnectedBluetoothDevice')
-    if (lastDeviceAddress && !hasConnectedDevice()) {
-      // Start network screen timer (shows after 5 seconds)
-      startNetworkScreenTimer()
+      ws.onopen = () => {
+        wsConnected.value = true
+        log.success('WebSocket connected')
+      }
 
-      // Start reconnection after initial delay
-      setTimeout(() => {
-        attemptReconnect()
-      }, INITIAL_RECONNECT_DELAY)
+      ws.onclose = () => {
+        wsConnected.value = false
+        log.warn('WebSocket disconnected')
+        wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
+      }
+
+      ws.onerror = () => {
+        log.error('WebSocket error')
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          handleWsMessage(data)
+        } catch { /* ignore */ }
+      }
+    } catch {
+      wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
     }
   }
 
-  onMounted(() => {
-    // Skip initialization entirely if Bluetooth is disabled
-    if (!BLUETOOTH_ENABLED) {
-      return
-    }
+  function handleWsMessage(data: { type: string; payload?: unknown }) {
+    const payload = data.payload as { address?: string; device?: { address: string; name?: string } } | undefined
 
-    // Soft start: delay Bluetooth initialization to reduce startup load
-    // This is staggered after network check (3s) to spread out the load
-    softStartTimeoutRef = setTimeout(() => {
-      softStartTimeoutRef = null
-      init()
-    }, SOFT_START_DELAY)
-  })
+    // Normalize event type (handle both / and \\ separators)
+    const eventType = data.type.replace(/\\\\/g, '/').replace(/\\/g, '/')
+    log.info(`WS: ${eventType}`)
+
+    switch (eventType) {
+      case 'bluetooth/pairing':
+        log.warn(`Pairing request: ${(data.payload as PairingRequest)?.name}`)
+        pairingRequest.value = data.payload as PairingRequest
+        break
+
+      case 'bluetooth/paired':
+        log.success(`Paired: ${payload?.device?.name || payload?.device?.address}`)
+        pairingRequest.value = null
+        if (payload?.device?.address) {
+          setSetting('lastBluetoothDevice', payload.device.address)
+        }
+        fetchDevices()
+        break
+
+      case 'bluetooth/connect':
+        log.success(`Device connected: ${payload?.address?.slice(-8) || '?'}`)
+        devicePresent = true
+        if (payload?.address) {
+          setSetting('lastBluetoothDevice', payload.address)
+        }
+        fetchDevices()
+        break
+
+      case 'bluetooth/disconnect':
+      case 'bluetooth/disconnected':
+        log.warn(`Device disconnected: ${payload?.address?.slice(-8) || '?'}`)
+        // Don't auto-reconnect from WS events - let user trigger manually or on next boot
+        fetchDevices()
+        break
+
+      case 'bluetooth/network/disconnect':
+        // NAP disconnected - ignore, we don't use Personal Hotspot
+        log.info('NAP disconnected (ignored)')
+        break
+    }
+  }
+
+  // ============================================================
+  // INITIALIZATION (on-demand for network screen)
+  // ============================================================
+
+  async function initOnDemand() {
+    log.info('On-demand init (network screen)')
+    connectWebSocket()
+    await startDiscovery()
+    await fetchDevices()
+  }
+
+  // ============================================================
+  // LIFECYCLE - Register with centralized startup
+  // ============================================================
+
+  if (BLUETOOTH_ENABLED && !initStarted) {
+    initStarted = true
+
+    // Register init functions - will be called by startup.ts
+    registerBluetoothInit(() => {
+      log.info('Initializing Bluetooth...')
+      loadSettings()
+      connectWebSocket()
+      fetchDevices()
+    })
+
+    registerPresenceInit(() => {
+      log.info('Starting presence detection...')
+      // Try initial reconnect, then start presence loop
+      const savedDevice = getSetting('lastBluetoothDevice')
+      if (savedDevice) {
+        startReconnectLoop()
+        startPresenceLoop()
+      }
+    })
+  }
 
   onUnmounted(() => {
-    if (softStartTimeoutRef) {
-      clearTimeout(softStartTimeoutRef)
-      softStartTimeoutRef = null
-    }
-    closeWebSocket()
-    stopDiscovery()
-    cleanupReconnectTimer()
-    cleanupNetworkScreenTimer()
-    stopNetworkPolling()
+    // Note: We don't cleanup on unmount since state is singleton
   })
 
+  // ============================================================
+  // EXPORTS
+  // ============================================================
+
   return {
+    // State
     devices,
     isLoading,
     isConnecting,
@@ -593,18 +534,28 @@ export function useBluetooth() {
     shouldShowNetworkScreen,
     pairingRequest,
     wsConnected,
+
+    // Actions
     fetchDevices,
     startDiscovery,
     stopDiscovery,
     connectDevice,
     disconnectDevice,
     forgetDevice,
-    attemptReconnect,
-    stopReconnecting,
-    startNetworkPolling,
-    stopNetworkPolling,
     acceptPairing,
     denyPairing,
-    refresh: fetchDevices
+
+    // Reconnect
+    reconnect,
+    attemptReconnect: startReconnectLoop, // Alias for compatibility
+    stopReconnecting,
+
+    // Init
+    initOnDemand,
+    refresh: fetchDevices,
+
+    // Legacy compatibility (unused but exported)
+    startNetworkPolling: () => {},
+    stopNetworkPolling: () => {},
   }
 }

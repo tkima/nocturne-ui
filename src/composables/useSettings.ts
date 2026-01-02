@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Display
   use24HourTime: false,
   showStatusBar: true,
+  // Debug
+  debugOverlayEnabled: false,
   // Auth tokens (persisted across reboots)
   accessToken: null,
   refreshToken: null,
@@ -50,6 +52,8 @@ export interface Settings {
   // Display
   use24HourTime: boolean
   showStatusBar: boolean
+  // Debug
+  debugOverlayEnabled: boolean
   // Auth tokens
   accessToken: string | null
   refreshToken: string | null
@@ -65,86 +69,127 @@ const settings = ref<Settings>({ ...DEFAULT_SETTINGS })
 const isLoaded = ref(false)
 const isSaving = ref(false)
 
+// Promise to track loading completion (allows multiple callers to await)
+let loadingPromise: Promise<void> | null = null
+
 /**
  * Load settings from file (or localStorage in dev mode)
+ * Multiple callers can await this - they'll all wait for the same load operation
  */
 async function loadSettings(): Promise<void> {
-  if (isLoaded.value) return
-
-  try {
-    if (IS_DEV) {
-      // In dev mode, use localStorage
-      const stored = localStorage.getItem('nocturne_settings')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        settings.value = { ...DEFAULT_SETTINGS, ...parsed }
-      }
-    } else {
-      // On device, read settings.json with cache-busting
-      const response = await fetch('/settings.json?t=' + Date.now(), {
-        cache: 'no-store'
-      })
-      if (response.ok) {
-        const parsed = await response.json()
-        settings.value = { ...DEFAULT_SETTINGS, ...parsed }
-      }
-    }
-  } catch (err) {
-    console.error('Failed to load settings:', err)
+  // If already loaded, return immediately
+  if (isLoaded.value) {
+    console.log('[Settings] Already loaded, startWithNowPlaying =', settings.value.startWithNowPlaying)
+    return
   }
 
-  isLoaded.value = true
+  // If loading is in progress, wait for it
+  if (loadingPromise) {
+    console.log('[Settings] Loading in progress, waiting...')
+    return loadingPromise
+  }
+
+  // Start loading
+  console.log('[Settings] Starting load...')
+  loadingPromise = (async () => {
+    try {
+      if (IS_DEV) {
+        // In dev mode, use localStorage
+        const stored = localStorage.getItem('nocturne_settings')
+        console.log('[Settings] Dev mode, localStorage:', stored ? 'found' : 'not found')
+        if (stored) {
+          const parsed = JSON.parse(stored)
+          settings.value = { ...DEFAULT_SETTINGS, ...parsed }
+          console.log('[Settings] Loaded from localStorage, startWithNowPlaying =', settings.value.startWithNowPlaying)
+        } else {
+          console.log('[Settings] Using defaults, startWithNowPlaying =', settings.value.startWithNowPlaying)
+        }
+      } else {
+        // On device, read settings.json with cache-busting
+        const response = await fetch('/settings.json?t=' + Date.now(), {
+          cache: 'no-store'
+        })
+        if (response.ok) {
+          const parsed = await response.json()
+          settings.value = { ...DEFAULT_SETTINGS, ...parsed }
+          console.log('[Settings] Loaded from file, startWithNowPlaying =', settings.value.startWithNowPlaying)
+        } else {
+          console.log('[Settings] File not found, using defaults')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load settings:', err)
+    }
+
+    isLoaded.value = true
+    loadingPromise = null
+  })()
+
+  return loadingPromise
 }
+
+// Queue to handle concurrent save requests
+let savePromise: Promise<boolean> | null = null
 
 /**
  * Save settings to file (or localStorage in dev mode)
+ * Queues saves to prevent concurrent writes
  */
 async function saveSettings(): Promise<boolean> {
-  if (isSaving.value) return false
+  // If a save is in progress, wait for it then save again with latest values
+  if (savePromise) {
+    await savePromise
+  }
+
   isSaving.value = true
 
-  try {
-    if (IS_DEV) {
-      // In dev mode, use localStorage
-      localStorage.setItem('nocturne_settings', JSON.stringify(settings.value))
-      isSaving.value = false
-      return true
-    }
+  savePromise = (async () => {
+    try {
+      if (IS_DEV) {
+        // In dev mode, use localStorage
+        localStorage.setItem('nocturne_settings', JSON.stringify(settings.value))
+        return true
+      }
 
-    // On device, use save-settings.sh via nocturned /device/exec
-    const settingsJson = JSON.stringify(settings.value, null, 2)
-    const base64Content = btoa(settingsJson)
+      // On device, use save-settings.sh via nocturned /device/exec
+      const settingsJson = JSON.stringify(settings.value, null, 2)
+      const base64Content = btoa(settingsJson)
 
-    const response = await fetch(`${NOCTURNED_URL}/device/exec`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        commands: [`/etc/nocturne/ui/save-settings.sh ${base64Content}`]
+      console.log('[Settings] Saving to device...')
+
+      const response = await fetch(`${NOCTURNED_URL}/device/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commands: [`/etc/nocturne/ui/save-settings.sh ${base64Content}`]
+        })
       })
-    })
 
-    if (!response.ok) {
-      console.error('Failed to save settings:', response.status)
-      isSaving.value = false
+      if (!response.ok) {
+        console.error('[Settings] Save failed:', response.status)
+        return false
+      }
+
+      const result = await response.json()
+      const cmdResult = result.results?.[0]
+
+      if (cmdResult?.exit_code !== 0) {
+        console.error('[Settings] Save script failed:', cmdResult?.error || cmdResult?.output)
+        return false
+      }
+
+      console.log('[Settings] Saved successfully')
+      return true
+    } catch (err) {
+      console.error('[Settings] Save error:', err)
       return false
-    }
-
-    const result = await response.json()
-    const cmdResult = result.results?.[0]
-
-    if (cmdResult?.exit_code !== 0) {
-      console.error('Save settings script failed:', cmdResult?.error || cmdResult?.output)
+    } finally {
       isSaving.value = false
-      return false
+      savePromise = null
     }
+  })()
 
-    isSaving.value = false
-    return true
-  } catch (err) {
-    console.error('Failed to save settings:', err)
-    isSaving.value = false
-    return false
-  }
+  return savePromise
 }
 
 /**
@@ -156,8 +201,11 @@ function get<K extends keyof Settings>(key: K): Settings[K] {
 
 /**
  * Set a setting value and save
+ * Ensures settings are loaded first to prevent overwriting with defaults
  */
 async function set<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
+  // Ensure settings are loaded before modifying to prevent overwriting with defaults
+  await loadSettings()
   settings.value[key] = value
   await saveSettings()
 }
@@ -169,9 +217,12 @@ export type BooleanSettingKey = {
 
 /**
  * Toggle a boolean setting and save
+ * Ensures settings are loaded first to prevent overwriting with defaults
  */
 async function toggle(key: BooleanSettingKey): Promise<void> {
-  (settings.value[key] as boolean) = !settings.value[key]
+  // Ensure settings are loaded before modifying to prevent overwriting with defaults
+  await loadSettings()
+  ;(settings.value[key] as boolean) = !settings.value[key]
   await saveSettings()
 }
 
