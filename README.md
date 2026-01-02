@@ -237,6 +237,23 @@ nocturne-vue/src/
   - Brightness slider (1-220)
   - Auto-brightness toggle
 
+### Debug Options
+
+The following debug and display options can be toggled in **Settings**:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Debug Overlay** | Off | Shows real-time debug logs on screen with category filtering (App, Auth, Boot, BT, Spotify, Settings). Useful for troubleshooting on-device. |
+| **Start with Now Playing** | Off | Launch directly to Now Playing screen instead of Recents after boot |
+| **Track Name Scrolling** | On | Animate long track/artist names on Now Playing |
+| **Song Change Gesture** | On | Swipe left/right on Now Playing to skip tracks |
+| **Elapsed Time** | Off | Show elapsed time instead of remaining time on progress bar |
+| **Dial Seek** | On | Use dial rotation to seek ±10 seconds |
+| **24-Hour Time** | Off | Use 24-hour format in status bar |
+| **Show Status Bar** | On | Display time and connection status at top |
+
+Settings are stored in `/etc/nocturne/ui/settings.json` and persist across reboots.
+
 ### Network Settings
 - **WiFi**: Requires Nocturne Connector on Raspberry Pi (`172.16.42.1:20574`)
   - Scan networks, connect with password, forget networks
