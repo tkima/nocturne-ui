@@ -77,6 +77,8 @@ ssh ${DEVICE_USER}@${DEVICE_IP} "rm -rf ${REMOTE_PATH}/assets/*"
 ssh ${DEVICE_USER}@${DEVICE_IP} "cp ${REMOTE_PATH}/settings.json /tmp/settings.json.bak 2>/dev/null || true"
 scp -r dist/* ${DEVICE_USER}@${DEVICE_IP}:${REMOTE_PATH}/
 ssh ${DEVICE_USER}@${DEVICE_IP} "cp /tmp/settings.json.bak ${REMOTE_PATH}/settings.json 2>/dev/null || true"
+# Fix Windows line endings on shell scripts
+ssh ${DEVICE_USER}@${DEVICE_IP} "sed -i 's/\r$//' ${REMOTE_PATH}/*.sh 2>/dev/null || true"
 ssh ${DEVICE_USER}@${DEVICE_IP} "mount -o remount,ro /"
 echo -e "${GREEN}Files deployed${NC}"
 
