@@ -126,3 +126,6 @@ export { createSettingsComponent } from './SettingsComponent'
 export { createAuthComponent } from './AuthComponent'
 export { createNetworkComponent } from './NetworkComponent'
 export { createBluetoothComponent, hasConnectedDevice } from './BluetoothComponent'
+
+// Export test utilities (also registers on window object)
+export { testAuthBoot, testTokenValidation, testTokenRefresh } from './testAuthBoot'

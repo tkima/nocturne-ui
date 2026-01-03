@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { logger } from '@/utils/logger'
+import { useSettings, type ButtonMapping } from '@/composables/useSettings'
 
 interface ButtonMappingOptions {
   contentId: string | null
@@ -33,7 +34,7 @@ export function useButtonMapping(options: () => ButtonMappingOptions) {
   const longPressTimers: Record<string, ReturnType<typeof setTimeout> | null> = {}
   let isMappingRef = false
 
-  function saveButtonMapping(buttonNumber: string) {
+  async function saveButtonMapping(buttonNumber: string) {
     const { contentId, contentType, contentImage, contentName } = options()
 
     if (!contentId || !contentType) {
@@ -41,15 +42,26 @@ export function useButtonMapping(options: () => ButtonMappingOptions) {
       return
     }
 
-    localStorage.setItem(`button${buttonNumber}Id`, contentId)
-    localStorage.setItem(`button${buttonNumber}Type`, contentType)
-
     let imageToSave = contentImage
     if (contentType === 'liked-songs' && !imageToSave) {
       imageToSave = '/images/liked-songs.webp'
     }
-    localStorage.setItem(`button${buttonNumber}Image`, imageToSave || '')
-    localStorage.setItem(`button${buttonNumber}Name`, contentName || '')
+
+    const { settings, set } = useSettings()
+    const index = parseInt(buttonNumber) - 1 // Convert "1"-"4" to 0-3
+    const mapping: ButtonMapping = {
+      id: contentId,
+      type: contentType,
+      image: imageToSave || null,
+      name: contentName || null,
+    }
+
+    // Update the button mapping at the correct index
+    const newMappings: (ButtonMapping | null)[] = settings.value.buttonMappings.map(m =>
+      m ? { ...m, tracks: m.tracks ? [...m.tracks] : null } : null
+    )
+    newMappings[index] = mapping
+    await set('buttonMappings', newMappings)
 
     logger.info('Button mapping saved', {
       button: buttonNumber,
@@ -144,12 +156,20 @@ export function useButtonMapping(options: () => ButtonMappingOptions) {
 }
 
 // Helper to get saved preset
-export function getPreset(buttonNumber: string) {
+export function getPreset(buttonNumber: string): ButtonMapping {
+  const { settings } = useSettings()
+  const index = parseInt(buttonNumber) - 1 // Convert "1"-"4" to 0-3
+  const mapping = settings.value.buttonMappings[index]
+  if (!mapping) {
+    return { id: null, type: null, image: null, name: null }
+  }
+  // Create mutable copy from readonly settings
   return {
-    id: localStorage.getItem(`button${buttonNumber}Id`),
-    type: localStorage.getItem(`button${buttonNumber}Type`),
-    image: localStorage.getItem(`button${buttonNumber}Image`),
-    name: localStorage.getItem(`button${buttonNumber}Name`),
+    id: mapping.id,
+    type: mapping.type,
+    image: mapping.image,
+    name: mapping.name,
+    tracks: mapping.tracks ? [...mapping.tracks] : null,
   }
 }
 
@@ -180,11 +200,9 @@ export async function playPreset(
       await playFn({ context_uri: `spotify:show:${preset.id}` })
       break
     case 'liked-songs':
-      // For liked songs, we'd need track URIs stored separately
-      const tracksJson = localStorage.getItem(`button${buttonNumber}Tracks`)
-      if (tracksJson) {
-        const uris = JSON.parse(tracksJson)
-        await playFn({ uris })
+      // For liked songs, track URIs are stored in the mapping
+      if (preset.tracks && preset.tracks.length > 0) {
+        await playFn({ uris: preset.tracks })
       }
       break
   }

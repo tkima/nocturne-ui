@@ -19,8 +19,24 @@ export interface DebugLogEntry {
   type: 'info' | 'success' | 'error' | 'warn'
 }
 
+// Load persisted logs from localStorage on startup
+function loadPersistedLogs(): DebugLogEntry[] {
+  if (!DEBUG_ENABLED) return []
+  try {
+    const saved = localStorage.getItem('debug_logs')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed)) {
+        return parsed
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return []
+}
+
 // Shared debug logs (accessible from debug overlay)
-export const debugLogs = ref<DebugLogEntry[]>([])
+// Initialize with persisted logs so they survive browser restarts
+export const debugLogs = ref<DebugLogEntry[]>(loadPersistedLogs())
 
 // Category filter for overlay
 export const debugCategory = ref<string | null>(null)
@@ -45,15 +61,23 @@ export function addDebugLog(
 
   debugLogs.value.unshift({ time, category, message, type })
 
-  // Keep max 500 entries to prevent memory leaks
-  if (debugLogs.value.length > 500) {
+  // Keep max 1000 entries to allow debugging across multiple restarts
+  if (debugLogs.value.length > 1000) {
     debugLogs.value.pop()
   }
 
-  // Save to localStorage for post-mortem debugging
+  // Persist ALL logs to localStorage for debugging across restarts
   try {
     localStorage.setItem('debug_logs', JSON.stringify(debugLogs.value))
-  } catch { /* ignore */ }
+  } catch (e) {
+    // If localStorage is full, trim older entries and retry
+    if (debugLogs.value.length > 200) {
+      debugLogs.value = debugLogs.value.slice(0, 200)
+      try {
+        localStorage.setItem('debug_logs', JSON.stringify(debugLogs.value))
+      } catch { /* give up */ }
+    }
+  }
 }
 
 /**

@@ -3,6 +3,7 @@
      ============================================================ -->
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
+import { useSettings } from '@/composables/useSettings'
 
 interface Props {
   show: boolean
@@ -19,19 +20,19 @@ const isVisible = ref(false)
 function preloadImages() {
   const images: Record<number, string> = {}
   const types: Record<number, string> = {}
+  const { settings } = useSettings()
 
   ;[1, 2, 3, 4].forEach((buttonNum) => {
-    const imageUrl = localStorage.getItem(`button${buttonNum}Image`)
-    const contentType = localStorage.getItem(`button${buttonNum}Type`)
+    const mapping = settings.value.buttonMappings[buttonNum - 1]
 
-    if (imageUrl) {
+    if (mapping?.image) {
       // Preload image
       const img = new Image()
-      img.src = imageUrl
-      images[buttonNum] = imageUrl
+      img.src = mapping.image
+      images[buttonNum] = mapping.image
     }
-    if (contentType) {
-      types[buttonNum] = contentType
+    if (mapping?.type) {
+      types[buttonNum] = mapping.type
     }
   })
 

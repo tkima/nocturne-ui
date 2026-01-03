@@ -194,25 +194,24 @@ export const useSpotifyStore = defineStore('spotify', () => {
     options: RequestInit = {},
     retryCount = 0
   ): Promise<T | null> {
-    const token = await authStore.ensureValidToken()
-    if (!token) {
-      error.value = 'Not authenticated'
-      retryError.value = 'Not authenticated - please log in again'
-      needsRetry.value = true
+    // Skip if not connected (no network or not authenticated)
+    if (!authStore.isConnected) {
+      log.warn(`API skipped (not connected): ${endpoint}`)
       return null
     }
 
-    // Rate limiting: wait if we're making requests too fast
-    const now = Date.now()
-    const timeSinceLastRequest = now - lastRequestTime
-    if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
-      await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL - timeSinceLastRequest))
+    const token = await authStore.ensureValidToken()
+    if (!token) {
+      setRetryError('Not authenticated - please log in again')
+      return null
     }
-    lastRequestTime = Date.now()
+
+    await enforceRateLimit()
 
     const method = options.method || 'GET'
-    const requestId = Math.random().toString(36).substring(2, 8)
-    const requestStartTime = Date.now()
+    const requestId = generateRequestId()
+    const startTime = Date.now()
+
     logger.info('API request', { requestId, method, endpoint })
 
     try {
@@ -225,135 +224,168 @@ export const useSpotifyStore = defineStore('spotify', () => {
         },
       })
 
-      const duration = Date.now() - requestStartTime
+      const duration = Date.now() - startTime
+      logger.info('API response', { requestId, method, endpoint, status: response.status, duration })
 
-      // Log ALL responses for debugging
-      logger.info('API response', {
-        requestId,
-        method,
-        endpoint,
-        status: response.status,
-        statusText: response.statusText,
-        duration
-      })
-
-      // Record stats for this request
       recordRequest(endpoint, method, response.status, duration, retryCount)
 
-      // Success - clear retry state
+      // Success responses
       if (response.status === 204) {
-        needsRetry.value = false
-        retryError.value = null
+        clearRetryState()
         return null
       }
 
-      // Log response body for non-2xx responses
-      if (!response.ok) {
-        const responseBody = await response.clone().json().catch(() => ({}))
-        logger.warn('API response error body', {
-          requestId,
-          endpoint,
-          body: responseBody
-        })
+      if (response.ok) {
+        clearRetryState()
+        return await response.json()
       }
 
-      // Handle rate limiting (429) - use Retry-After header or our backoff
-      if (response.status === 429) {
-        if (retryCount >= MAX_RETRIES) {
-          logger.error('Max retries reached for rate limit', { endpoint, retryCount })
-          error.value = 'Too many requests - please try again later'
-          retryError.value = 'Rate limited by Spotify. Please wait and try again.'
-          needsRetry.value = true
-          return null
-        }
+      // Error responses
+      return await handleErrorResponse<T>(response, endpoint, options, retryCount)
 
-        const retryAfter = parseInt(response.headers.get('Retry-After') || '1', 10)
-        const delay = retryAfter * 1000
-        logger.warn('Rate limited, retrying', { retryCount: retryCount + 1, delay })
-        await new Promise(resolve => setTimeout(resolve, delay))
-        return apiRequest<T>(endpoint, options, retryCount + 1)
-      }
-
-      // Handle server errors (5xx) with retry
-      if (response.status >= 500) {
-        if (retryCount >= MAX_RETRIES) {
-          logger.error('Max retries reached for server error', { endpoint, status: response.status })
-          error.value = 'Spotify server error - please try again later'
-          retryError.value = 'Spotify is having issues. Please try again.'
-          needsRetry.value = true
-          return null
-        }
-
-        const delay = 1000
-        logger.warn('Server error, retrying', { status: response.status, retryCount: retryCount + 1, delay })
-        if (delay > 0) {
-          await new Promise(resolve => setTimeout(resolve, delay))
-        }
-        return apiRequest<T>(endpoint, options, retryCount + 1)
-      }
-
-      // Handle auth errors - try to refresh token and retry once
-      if (response.status === 401) {
-        logger.warn('Token expired (401), attempting refresh...')
-        const newToken = await authStore.ensureValidToken()
-        if (newToken && retryCount < 1) {
-          // Token refreshed, retry the request once
-          logger.info('Token refreshed, retrying request')
-          return apiRequest<T>(endpoint, options, retryCount + 1)
-        }
-        // Refresh failed or already retried - show error
-        error.value = 'Authentication expired'
-        retryError.value = 'Session expired - please log in again'
-        needsRetry.value = true
-        return null
-      }
-
-      // Handle 404 - check for special cases
-      if (response.status === 404) {
-        const errorData = await response.clone().json().catch(() => ({}))
-        // Check for "No active device" error
-        if (errorData.error?.reason === 'NO_ACTIVE_DEVICE') {
-          error.value = 'No active device found'
-          retryError.value = 'Open Spotify on your phone to connect'
-          needsRetry.value = true
-          logger.warn('No active device found')
-        }
-        return null
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error?.message || `API error: ${response.status}`)
-      }
-
-      // Success - clear retry state
-      needsRetry.value = false
-      retryError.value = null
-      return await response.json()
     } catch (err) {
-      // Network errors - retry with backoff
-      if (retryCount < MAX_RETRIES) {
-        const delay = 1000
-        logger.warn('Network error, retrying', { error: err, retryCount: retryCount + 1, delay })
-        if (delay > 0) {
-          await new Promise(resolve => setTimeout(resolve, delay))
-        }
-        return apiRequest<T>(endpoint, options, retryCount + 1)
-      }
-
-      logger.error('Max retries reached for network error', { endpoint, error: err })
-      error.value = err instanceof Error ? err.message : 'API request failed'
-      retryError.value = 'Connection failed. Check your internet and try again.'
-      needsRetry.value = true
-      return null
+      return await handleNetworkError<T>(err, endpoint, options, retryCount)
     }
   }
 
-  // Clear retry state (call after successful manual retry)
+  // ------------------------------------------------------------
+  // API Request Helpers
+  // ------------------------------------------------------------
+  async function enforceRateLimit() {
+    const timeSinceLastRequest = Date.now() - lastRequestTime
+    if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+      await sleep(MIN_REQUEST_INTERVAL - timeSinceLastRequest)
+    }
+    lastRequestTime = Date.now()
+  }
+
+  async function handleErrorResponse<T>(
+    response: Response,
+    endpoint: string,
+    options: RequestInit,
+    retryCount: number
+  ): Promise<T | null> {
+    const errorBody = await response.clone().json().catch(() => ({}))
+    logger.warn('API error', { endpoint, status: response.status, body: errorBody })
+
+    // Rate limiting (429)
+    if (response.status === 429) {
+      return handleRateLimit<T>(response, endpoint, options, retryCount)
+    }
+
+    // Server errors (5xx)
+    if (response.status >= 500) {
+      return handleServerError<T>(response.status, endpoint, options, retryCount)
+    }
+
+    // Auth errors (401)
+    if (response.status === 401) {
+      return handleAuthError<T>(endpoint, options, retryCount)
+    }
+
+    // No active device (404)
+    if (response.status === 404 && errorBody.error?.reason === 'NO_ACTIVE_DEVICE') {
+      setRetryError('Open Spotify on your phone to connect')
+      return null
+    }
+
+    // Other errors
+    const message = errorBody.error?.message || `API error: ${response.status}`
+    throw new Error(message)
+  }
+
+  async function handleRateLimit<T>(
+    response: Response,
+    endpoint: string,
+    options: RequestInit,
+    retryCount: number
+  ): Promise<T | null> {
+    if (retryCount >= MAX_RETRIES) {
+      setRetryError('Rate limited by Spotify. Please wait and try again.')
+      return null
+    }
+
+    const retryAfter = parseInt(response.headers.get('Retry-After') || '1', 10)
+    const delay = retryAfter * 1000
+
+    logger.warn('Rate limited, retrying', { retryCount: retryCount + 1, delay })
+    await sleep(delay)
+
+    return apiRequest<T>(endpoint, options, retryCount + 1)
+  }
+
+  async function handleServerError<T>(
+    status: number,
+    endpoint: string,
+    options: RequestInit,
+    retryCount: number
+  ): Promise<T | null> {
+    if (retryCount >= MAX_RETRIES) {
+      setRetryError('Spotify is having issues. Please try again.')
+      return null
+    }
+
+    logger.warn('Server error, retrying', { status, retryCount: retryCount + 1 })
+    await sleep(1000)
+
+    return apiRequest<T>(endpoint, options, retryCount + 1)
+  }
+
+  async function handleAuthError<T>(
+    endpoint: string,
+    options: RequestInit,
+    retryCount: number
+  ): Promise<T | null> {
+    logger.warn('Token expired (401), attempting refresh...')
+
+    const newToken = await authStore.ensureValidToken()
+    if (newToken && retryCount < 1) {
+      logger.info('Token refreshed, retrying request')
+      return apiRequest<T>(endpoint, options, retryCount + 1)
+    }
+
+    setRetryError('Session expired - please log in again')
+    return null
+  }
+
+  async function handleNetworkError<T>(
+    err: unknown,
+    endpoint: string,
+    options: RequestInit,
+    retryCount: number
+  ): Promise<T | null> {
+    if (retryCount < MAX_RETRIES) {
+      logger.warn('Network error, retrying', { error: err, retryCount: retryCount + 1 })
+      await sleep(1000)
+      return apiRequest<T>(endpoint, options, retryCount + 1)
+    }
+
+    logger.error('Max retries reached', { endpoint, error: err })
+    setRetryError('Connection failed. Check your internet and try again.')
+    return null
+  }
+
+  // ------------------------------------------------------------
+  // Utility Functions
+  // ------------------------------------------------------------
+  function setRetryError(message: string) {
+    error.value = message
+    retryError.value = message
+    needsRetry.value = true
+  }
+
   function clearRetryState() {
     needsRetry.value = false
     retryError.value = null
     error.value = null
+  }
+
+  function generateRequestId(): string {
+    return Math.random().toString(36).substring(2, 8)
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
   }
 
   // ------------------------------------------------------------
@@ -391,16 +423,6 @@ export const useSpotifyStore = defineStore('spotify', () => {
         imageUrl: data.item?.images?.[0]?.url,
       })
       currentPlayback.value = data
-
-      // Cache artist info for tracks (reduces "Unknown Artist" occurrences)
-      const trackId = data.item?.id
-      const artists = data.item?.artists
-      if (trackId && artists?.length) {
-        const artistName = artists.map(a => a.name).join(', ')
-        if (artistName) {
-          localStorage.setItem(`artist_cache_${trackId}`, artistName)
-        }
-      }
     } else {
       log.warn('Poll: No playback')
     }
