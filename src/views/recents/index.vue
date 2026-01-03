@@ -2,10 +2,11 @@
      Recents View - Recently played albums and playlists
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed } from 'vue'
+import { onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useNetwork } from '@/composables/useNetwork'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
@@ -20,6 +21,7 @@ const log = createLogger('Recents')
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const { isConnected } = useNetwork()
 const { fastPollMode } = useBluetoothTrigger()
 
 // ------------------------------------------------------------
@@ -130,30 +132,28 @@ function stopPlaybackPolling() {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  log.info(`onMounted: isAuth=${authStore.isAuthenticated}, token=${!!authStore.accessToken}`)
+async function fetchRecents() {
+  log.info('Fetching recents + playlists...')
+  await Promise.all([
+    spotifyStore.fetchRecentlyPlayed(),
+    spotifyStore.fetchUserPlaylists(),
+    spotifyStore.fetchCurrentPlayback()
+  ])
+  log.success(`Fetched ${albums.value.length} albums, ${playlists.value.length} playlists`)
+  startPlaybackPolling()
+}
 
-  if (authStore.isAuthenticated) {
-    log.info('Fetching recents + playlists...')
-    try {
-      await Promise.all([
-        spotifyStore.fetchRecentlyPlayed(),
-        spotifyStore.fetchUserPlaylists(),
-        spotifyStore.fetchCurrentPlayback()
-      ])
-      log.success(`Fetched ${albums.value.length} albums, ${playlists.value.length} playlists`)
+onMounted(() => {
+  if (authStore.isAuthenticated && isConnected.value) {
+    fetchRecents()
+  }
+})
 
-      // Check for errors
-      if (spotifyStore.needsRetry) {
-        log.error(`Fetch failed: ${spotifyStore.retryError}`)
-      }
-
-      startPlaybackPolling()
-    } catch (e) {
-      log.error(`Fetch error: ${e instanceof Error ? e.message : 'unknown'}`)
-    }
-  } else {
-    log.warn('Not authenticated, skipping fetch')
+// Watch for network ready - wait 1s then fetch
+watch(isConnected, (connected) => {
+  if (connected && authStore.isAuthenticated && recentItems.value.length === 0) {
+    log.info('Network connected, fetching recents in 1s...')
+    setTimeout(() => fetchRecents(), 1000)
   }
 })
 
