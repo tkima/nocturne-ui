@@ -100,10 +100,7 @@ async function handleEpisodePlay(episode: any, index: number) {
   }
 
   // Play the episode
-  await spotifyStore.play({ uris: [episode.uri] })
-
-  // Navigate immediately, fetch in background
-  spotifyStore.fetchPlaybackDebounced()
+  spotifyStore.play({ uris: [episode.uri] })
   router.push('/now-playing')
 }
 

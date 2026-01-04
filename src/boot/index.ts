@@ -4,6 +4,7 @@
  */
 
 import { useBootStore } from '@/stores/boot'
+import { useSpotifyStore } from '@/stores/spotify'
 import { createSettingsComponent } from './SettingsComponent'
 import { createAuthComponent } from './AuthComponent'
 import { createNetworkComponent } from './NetworkComponent'
@@ -17,98 +18,130 @@ let bootStarted = false
 /**
  * Start the boot sequence
  *
- * Phase 1 (blocking - for loading screen):
+ * @param phase - undefined: full boot, 'init': phase 1 only, 'connect': phase 2 only (for reconnect)
+ *
+ * Phase 1 / init (blocking - for loading screen):
  *   1. Settings → load settings from file
  *
- * Phase 2 (background - after loading screen):
+ * Phase 2 / connect (background - after loading screen):
  *   2. Bluetooth → start polling
  *   3. Network → wait until connected (max 15s)
  *   4. Auth → validate token via API (only if network ready)
  */
-export async function startBoot(): Promise<void> {
-  if (bootStarted) {
-    log.warn('Boot already started, ignoring')
-    return
-  }
-  bootStarted = true
-
-  const startTime = Date.now()
-  log.success('════════════════════════════════════════')
-  log.success('       BOOT SEQUENCE STARTED')
-  log.success('════════════════════════════════════════')
-
+export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
   const bootStore = useBootStore()
-  bootStore.bootPhase = 'starting'
-
-  // Create components
-  log.info('Creating boot components...')
-  const settingsComponent = createSettingsComponent()
-  const authComponent = createAuthComponent()
-  const networkComponent = createNetworkComponent()
-  const bluetoothComponent = createBluetoothComponent()
-
-  // Register with store
-  bootStore.registerComponent(settingsComponent)
-  bootStore.registerComponent(authComponent)
-  bootStore.registerComponent(networkComponent)
-  bootStore.registerComponent(bluetoothComponent)
-  log.info('Components registered with boot store')
+  const startTime = Date.now()
 
   // ============================================================
-  // Phase 1: Settings only (blocking - for loading screen)
+  // Phase 1 / init: Settings only (blocking - for loading screen)
   // ============================================================
+  if (!phase || phase === 'init') {
+    if (bootStarted) {
+      log.warn('Boot already started, ignoring')
+      return
+    }
+    bootStarted = true
 
-  log.info('[1/4] Settings...')
-  await settingsComponent.startup()
-  const settingsOk = await settingsComponent.init()
-  if (!settingsOk) {
-    log.error('Settings failed to load - boot may fail!')
+    log.success('════════════════════════════════════════')
+    log.success('       BOOT SEQUENCE STARTED')
+    log.success('════════════════════════════════════════')
+
+    bootStore.bootPhase = 'starting'
+
+    // Create components
+    log.info('Creating boot components...')
+    const settingsComponent = createSettingsComponent()
+    const authComponent = createAuthComponent()
+    const networkComponent = createNetworkComponent()
+    const bluetoothComponent = createBluetoothComponent()
+
+    // Register with store
+    bootStore.registerComponent(settingsComponent)
+    bootStore.registerComponent(authComponent)
+    bootStore.registerComponent(networkComponent)
+    bootStore.registerComponent(bluetoothComponent)
+    log.info('Components registered with boot store')
+
+    log.info('[1/4] Settings...')
+    await settingsComponent.startup()
+    const settingsOk = await settingsComponent.init()
+    if (!settingsOk) {
+      log.error('Settings failed to load - boot may fail!')
+    }
+
+    // Mark critical phase done - loading screen will complete
+    bootStore.bootPhase = 'critical'
+    const phase1Time = Date.now() - startTime
+    log.success(`Phase 1 complete in ${phase1Time}ms - loading screen can close`)
   }
 
-  // Mark critical phase done - loading screen will complete
-  bootStore.bootPhase = 'critical'
-  const phase1Time = Date.now() - startTime
-  log.success(`Phase 1 complete in ${phase1Time}ms - loading screen can close`)
-
   // ============================================================
-  // Phase 2: Network + Auth (background - after loading screen)
+  // Phase 2 / connect: Network + Auth (background - after loading screen)
   // ============================================================
+  if (!phase || phase === 'connect') {
+    if (phase === 'connect') {
+      log.info('════════════════════════════════════════')
+      log.info('       RECONNECT - Phase 2')
+      log.info('════════════════════════════════════════')
+    }
 
-  // Start bluetooth (doesn't need network/auth)
-  log.info('[2/4] Bluetooth (background)...')
-  bluetoothComponent.startup()
-    .then(() => {
-      const elapsed = Date.now() - startTime
-      log.success(`Bluetooth ready after ${elapsed}ms total`)
-    })
-    .catch((e) => {
-      log.error(`Bluetooth startup failed: ${e}`)
-    })
+    // Get components from store
+    const bluetoothComponent = bootStore.getComponent('bluetooth')
+    const networkComponent = bootStore.getComponent('network')
+    const authComponent = bootStore.getComponent('auth')
 
-  // Network + Auth in background (don't block UI)
-  log.info('[3/4] Network (background, max 15s)...')
-  networkComponent.startup()
-    .then(async () => {
-      const networkTime = Date.now() - startTime
-      log.info(`Network complete in ${networkTime}ms, connected=${bootStore.networkReady}`)
+    if (!networkComponent || !authComponent) {
+      log.error('Components not registered - was init phase run?')
+      return
+    }
 
-      // 4. Auth - only run if network connected
-      if (bootStore.networkReady) {
-        log.info('[4/4] Auth (validating token)...')
-        await authComponent.startup()
-        await authComponent.init()
-        authComponent.startPolling?.()
-        const totalTime = Date.now() - startTime
-        log.success(`Auth complete in ${totalTime}ms`)
-      } else {
-        log.warn('[4/4] Auth skipped - no network')
-      }
+    // Start bluetooth (skip on reconnect - already polling)
+    if (!phase && bluetoothComponent) {
+      log.info('[2/4] Bluetooth (background)...')
+      bluetoothComponent.startup()
+        .then(() => {
+          const elapsed = Date.now() - startTime
+          log.success(`Bluetooth ready after ${elapsed}ms total`)
+        })
+        .catch((e) => {
+          log.error(`Bluetooth startup failed: ${e}`)
+        })
+    }
 
-      bootStore.bootPhase = 'ready'
-    })
-    .catch((e) => {
-      log.error(`Network/Auth failed: ${e}`)
-    })
+    // Network + Auth in background (don't block UI)
+    log.info(`[3/4] Network (${phase === 'connect' ? 'reconnect' : 'background'}, max 15s)...`)
+    networkComponent.startup()
+      .then(async () => {
+        const networkTime = Date.now() - startTime
+        log.info(`Network complete in ${networkTime}ms, connected=${bootStore.networkReady}`)
+
+        // 4. Auth - only run if network connected
+        if (bootStore.networkReady) {
+          log.info('[4/4] Auth (validating token)...')
+          await authComponent.startup()
+          await authComponent.init()
+          authComponent.startPolling?.()
+          const totalTime = Date.now() - startTime
+          log.success(`Auth complete in ${totalTime}ms`)
+
+          // Prefetch data (populates store for reactive views)
+          // Delay 1s to let Spotify API settle after auth
+          setTimeout(() => {
+            log.info('Prefetching recents + playback...')
+            const spotifyStore = useSpotifyStore()
+            spotifyStore.fetchRecentlyPlayed()
+            spotifyStore.fetchCurrentPlayback()
+          }, 1000)
+        } else {
+          log.warn('[4/4] Auth skipped - no network')
+        }
+
+        bootStore.bootPhase = 'ready'
+      })
+      .catch((e) => {
+        log.error(`Network/Auth failed: ${e}`)
+      })
+  }
 }
 
 /**

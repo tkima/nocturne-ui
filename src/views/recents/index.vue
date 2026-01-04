@@ -73,15 +73,10 @@ const recentItems = computed(() => {
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-async function handleItemClick(item: { id: string; type: 'album' | 'playlist' }) {
-  if (item.type === 'album') {
-    logger.info('Play album', { albumId: item.id })
-    await spotifyStore.play({ context_uri: `spotify:album:${item.id}` })
-  } else {
-    logger.info('Play playlist', { playlistId: item.id })
-    await spotifyStore.play({ context_uri: `spotify:playlist:${item.id}` })
-  }
-  await spotifyStore.fetchCurrentPlayback()
+function handleItemClick(item: { id: string; type: 'album' | 'playlist' }) {
+  const contextUri = `spotify:${item.type}:${item.id}`
+  logger.info(`Play ${item.type}`, { id: item.id })
+  spotifyStore.play({ context_uri: contextUri })
   router.push('/now-playing')
 }
 

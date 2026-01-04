@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useSettings, type BooleanSettingKey } from '@/composables/useSettings'
+import { startBoot } from '@/boot'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -193,6 +194,9 @@ function handleAction(action: string) {
       authStore.logout()
       router.push('/auth/login')
       break
+    case 'retryConnection':
+      startBoot('connect')
+      break
   }
 }
 
@@ -346,7 +350,8 @@ const activeSectionData = computed(() => {
 
               <!-- Profile Info -->
               <div v-else-if="item.type === 'profile'" class="p-4 bg-white/10 rounded-xl border border-white/10">
-                <div v-if="userProfile" class="flex items-center">
+                <!-- Authenticated: show profile -->
+                <div v-if="authStore.isAuthenticated && userProfile" class="flex items-center">
                   <img
                     v-if="userProfile.images?.[0]?.url"
                     :src="userProfile.images[0].url"
@@ -365,6 +370,21 @@ const activeSectionData = computed(() => {
                     </p>
                   </div>
                 </div>
+                <!-- Not authenticated: show retry button -->
+                <div v-else-if="!authStore.isAuthenticated" class="space-y-3">
+                  <p class="text-[28px] font-[580] text-white/60 tracking-tight">
+                    Not connected to Spotify
+                  </p>
+                  <button
+                    class="bg-white/20 hover:bg-white/30 transition-colors rounded-xl px-6 py-3"
+                    @click="handleAction('retryConnection')"
+                  >
+                    <span class="text-[28px] font-[580] text-white tracking-tight">
+                      Retry Connection
+                    </span>
+                  </button>
+                </div>
+                <!-- Loading: show skeleton -->
                 <div v-else class="flex items-center">
                   <div class="w-16 h-16 bg-white/20 rounded-full animate-pulse" />
                   <div class="ml-4 space-y-2">

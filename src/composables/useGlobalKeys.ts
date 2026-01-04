@@ -87,7 +87,47 @@ export function useGlobalKeys() {
   // Button 1-4 Handlers (presets)
   // ------------------------------------------------------------
   async function saveButtonMapping(buttonNumber: string) {
-    const { id, type, image, name } = uiStore.mappableContent
+    // Fetch fresh playback data before saving
+    await spotifyStore.fetchCurrentPlayback()
+    const playback = spotifyStore.currentPlayback
+
+    // Extract content from current playback
+    let id: string | null = null
+    let type: 'playlist' | 'album' | 'artist' | 'show' | 'liked-songs' | null = null
+    let image: string | null = null
+    let name: string | null = null
+
+    const contextUri = playback?.context?.uri
+    if (contextUri?.startsWith('spotify:playlist:')) {
+      id = contextUri.replace('spotify:playlist:', '')
+      type = 'playlist'
+    } else if (contextUri?.startsWith('spotify:album:')) {
+      id = contextUri.replace('spotify:album:', '')
+      type = 'album'
+    } else if (contextUri?.startsWith('spotify:show:')) {
+      id = contextUri.replace('spotify:show:', '')
+      type = 'show'
+    } else if (contextUri?.startsWith('spotify:artist:')) {
+      id = contextUri.replace('spotify:artist:', '')
+      type = 'artist'
+    } else if (playback?.item?.show?.id) {
+      // Episode without context - use show
+      id = playback.item.show.id
+      type = 'show'
+    } else if (playback?.item?.album?.id) {
+      // Track without context - use album
+      id = playback.item.album.id
+      type = 'album'
+    }
+
+    // Get image and name from playback
+    if (playback?.item) {
+      name = playback.item.name || null
+      image = playback.item.album?.images?.[0]?.url
+        || playback.item.images?.[0]?.url
+        || playback.item.show?.images?.[0]?.url
+        || null
+    }
 
     if (!id || !type) {
       logger.warn('Cannot save button mapping - no mappable content', { id, type })

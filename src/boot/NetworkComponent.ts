@@ -30,8 +30,16 @@ export function createNetworkComponent(): BootComponent {
   /**
    * Startup: register listeners, then loop until connected with stable connection
    * Requires 2 consecutive successful pings to handle BT tethering stabilization
+   * Idempotent: if already ready, just refresh and return (allows .then() to chain)
    */
   async function startup(): Promise<void> {
+    // Idempotent: if already ready, just refresh and return
+    if (status.value === 'ready') {
+      log.info('Already ready, refreshing connection...')
+      await network.refresh()
+      return
+    }
+
     log.info('startup() - registering listeners...')
     status.value = 'starting'
 

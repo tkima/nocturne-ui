@@ -86,7 +86,8 @@ function isPublicPath(): boolean {
 // Watchers
 // ------------------------------------------------------------
 watch(() => authStore.isAuthenticated, (isAuth) => {
-  if (!isAuth && !isPublicPath()) {
+  // Only redirect if loading is complete (avoid race during boot)
+  if (!isAuth && !showLoader.value && !isPublicPath()) {
     router.replace('/auth/login')
   }
 })

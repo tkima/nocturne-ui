@@ -32,11 +32,10 @@ async function handleTrackClick(track: Track, index: number) {
 
   // Play from this track with remaining top tracks as queue
   const trackUris = tracks.value.map(t => t.uri)
-  await spotifyStore.play({
+  spotifyStore.play({
     uris: trackUris,
     offset: { position: index }
   })
-  await spotifyStore.fetchCurrentPlayback()
   router.push('/now-playing')
 }
 

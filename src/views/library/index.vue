@@ -38,16 +38,14 @@ async function handleLikedSongsClick() {
   const tracks = spotifyStore.savedTracks
   if (tracks.length > 0) {
     const trackUris = tracks.map((t: Track) => t.uri)
-    await spotifyStore.play({ uris: trackUris })
-    await spotifyStore.fetchCurrentPlayback()
+    spotifyStore.play({ uris: trackUris })
     router.push('/now-playing')
   }
 }
 
-async function handlePlaylistClick(playlistId: string) {
+function handlePlaylistClick(playlistId: string) {
   logger.info('Play playlist', { playlistId })
-  await spotifyStore.play({ context_uri: `spotify:playlist:${playlistId}` })
-  await spotifyStore.fetchCurrentPlayback()
+  spotifyStore.play({ context_uri: `spotify:playlist:${playlistId}` })
   router.push('/now-playing')
 }
 
