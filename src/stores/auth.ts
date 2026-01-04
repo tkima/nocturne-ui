@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSettings } from '@/composables/useSettings'
+import { useNetwork } from '@/composables/useNetwork'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('Auth')
@@ -72,13 +73,15 @@ function getRedirectUri(): string {
 
 
 function getClientId(): string {
-  return localStorage.getItem('spotifyClientId') || CLIENT_ID
+  const { settings } = useSettings()
+  return settings.value.spotifyClientId || CLIENT_ID
 }
 
 // Check if we should use PKCE auth (custom client ID)
 function shouldUsePkceAuth(): boolean {
-  const customClientId = localStorage.getItem('spotifyClientId')
-  const authType = localStorage.getItem('spotifyAuthType')
+  const { settings } = useSettings()
+  const customClientId = settings.value.spotifyClientId
+  const authType = settings.value.spotifyAuthType
   const hasCustomEnvClientId = CLIENT_ID && CLIENT_ID !== SPOTIFY_CLIENT_ID_SHARED
   return !!customClientId || hasCustomEnvClientId || authType === 'pkce'
 }
@@ -128,59 +131,36 @@ export const useAuthStore = defineStore('auth', () => {
 
   const tokenReady = computed(() => isAuthenticated.value && !isTokenExpired.value)
 
+  // Combined check: authenticated + network connected (single source of truth for API calls)
+  const { isConnected: networkConnected } = useNetwork()
+  const isConnected = computed(() => isAuthenticated.value && networkConnected.value === true)
+
   // ------------------------------------------------------------
   // Actions
   // ------------------------------------------------------------
 
   /**
-   * Initialize auth state from localStorage and settings file.
+   * Initialize auth state from settings.
    * @deprecated Use the boot system (src/boot/AuthComponent.ts) instead.
    * This is kept for the test page "Reload Token" button.
    */
   async function initFromStorage() {
     log.info('initFromStorage called')
 
-    // First try localStorage (fast, works in dev)
-    const storedAccessToken = localStorage.getItem('spotifyAccessToken')
-    const storedRefreshToken = localStorage.getItem('spotifyRefreshToken')
-    const storedExpiry = localStorage.getItem('spotifyTokenExpiry')
+    const { settings, loadSettings } = getSettings()
+    await loadSettings()
 
-    log.info(`localStorage: access=${!!storedAccessToken}, refresh=${!!storedRefreshToken}`)
+    log.info(`settings: access=${!!settings.value.accessToken}, refresh=${!!settings.value.refreshToken}`)
 
-    if (storedAccessToken && storedRefreshToken) {
-      accessToken.value = storedAccessToken
-      refreshToken.value = storedRefreshToken
-      if (storedExpiry) {
-        tokenExpiry.value = new Date(storedExpiry)
+    if (settings.value.accessToken && settings.value.refreshToken) {
+      accessToken.value = settings.value.accessToken
+      refreshToken.value = settings.value.refreshToken
+      if (settings.value.tokenExpiry) {
+        tokenExpiry.value = new Date(settings.value.tokenExpiry)
       }
-      log.success('Loaded from localStorage')
-      return
-    }
-
-    // On device, try loading from settings.json (persists across reboots)
-    if (!IS_DEV_MODE) {
-      log.info('Trying settings.json...')
-      const { settings, loadSettings } = getSettings()
-      await loadSettings()
-
-      log.info(`settings.json: access=${!!settings.value.accessToken}, refresh=${!!settings.value.refreshToken}`)
-
-      if (settings.value.accessToken && settings.value.refreshToken) {
-        accessToken.value = settings.value.accessToken
-        refreshToken.value = settings.value.refreshToken
-        if (settings.value.tokenExpiry) {
-          tokenExpiry.value = new Date(settings.value.tokenExpiry)
-        }
-        // Sync to localStorage for faster access during session
-        localStorage.setItem('spotifyAccessToken', settings.value.accessToken)
-        localStorage.setItem('spotifyRefreshToken', settings.value.refreshToken)
-        if (settings.value.tokenExpiry) {
-          localStorage.setItem('spotifyTokenExpiry', settings.value.tokenExpiry)
-        }
-        log.success('Loaded from settings.json')
-      } else {
-        log.warn('No tokens in settings.json')
-      }
+      log.success('Loaded from settings')
+    } else {
+      log.warn('No tokens in settings')
     }
   }
 
@@ -192,13 +172,14 @@ export const useAuthStore = defineStore('auth', () => {
     const codeChallenge = await generateCodeChallenge(codeVerifier)
     const state = generateRandomString(16)
 
-    // Store for callback
-    localStorage.setItem('pkce_code_verifier', codeVerifier)
-    localStorage.setItem('pkce_state', state)
+    // Store for callback (use settings, not localStorage)
+    const { set } = getSettings()
+    await set('pkceCodeVerifier', codeVerifier)
+    await set('pkceState', state)
 
     const finalClientId = clientId || getClientId()
     if (clientId) {
-      localStorage.setItem('spotifyClientId', clientId)
+      await set('spotifyClientId', clientId)
     }
 
     const params = new URLSearchParams({
@@ -233,10 +214,11 @@ export const useAuthStore = defineStore('auth', () => {
       stopPolling()
 
       // Clear old PKCE session data to force a fresh session
-      localStorage.removeItem('pkce_code_verifier')
-      localStorage.removeItem('pkce_session')
-      localStorage.removeItem('pkce_redirect_uri')
-      localStorage.removeItem('pkce_state')
+      const { set } = getSettings()
+      await set('pkceCodeVerifier', null)
+      await set('pkceSession', null)
+      await set('pkceRedirectUri', null)
+      await set('pkceState', null)
       authData.value = null
 
       // Check if we should use PKCE auth
@@ -304,8 +286,9 @@ export const useAuthStore = defineStore('auth', () => {
     const codeChallenge = await generateCodeChallenge(codeVerifier)
     const session = generateRandomString(16)
 
-    localStorage.setItem('pkce_code_verifier', codeVerifier)
-    localStorage.setItem('pkce_session', session)
+    const { set } = getSettings()
+    await set('pkceCodeVerifier', codeVerifier)
+    await set('pkceSession', session)
 
     const params = new URLSearchParams({
       action: 'start',
@@ -315,17 +298,17 @@ export const useAuthStore = defineStore('auth', () => {
     })
 
     const url = `${AUTH_RELAY_URL}?${params.toString()}`
-    console.log('Starting relay PKCE auth:', { url: AUTH_RELAY_URL, session, clientId: getClientId(), retryCount })
+    log.info(`Starting relay PKCE auth: session=${session}, retryCount=${retryCount}`)
 
     const response = await fetch(url)
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '')
-      console.error('Relay auth error:', { status: response.status, body: errorText, retryCount })
+      log.error(`Relay auth error: status=${response.status}, retryCount=${retryCount}`)
 
       // If 400 error (bad request/expired), retry with fresh session
       if (response.status === 400 && retryCount < 2) {
-        console.log('Relay returned 400, retrying with fresh session...')
+        log.info('Relay returned 400, retrying with fresh session...')
         return startRelayPkceAuth(retryCount + 1)
       }
       throw new Error(`Relay auth failed: ${response.status} - ${errorText}`)
@@ -334,7 +317,7 @@ export const useAuthStore = defineStore('auth', () => {
     const data = await response.json()
 
     if (data.redirect_uri) {
-      localStorage.setItem('pkce_redirect_uri', data.redirect_uri)
+      await set('pkceRedirectUri', data.redirect_uri)
     }
 
     return {
@@ -427,7 +410,8 @@ export const useAuthStore = defineStore('auth', () => {
         if (tokens.access_token) {
           stopPolling()
           saveTokens(tokens)
-          localStorage.setItem('spotifyAuthType', 'device')
+          const { set } = getSettings()
+          await set('spotifyAuthType', 'device')
         }
       } catch (err) {
         if (!(err instanceof Error) || !err.message.includes('authorization_pending')) {
@@ -443,7 +427,8 @@ export const useAuthStore = defineStore('auth', () => {
    * Poll relay for auth code (PKCE flow)
    */
   async function pollRelayForCode() {
-    const session = localStorage.getItem('pkce_session')
+    const { settings } = useSettings()
+    const session = settings.value.pkceSession
     if (!session) return
 
     stopPolling()
@@ -494,8 +479,9 @@ export const useAuthStore = defineStore('auth', () => {
    * Exchange auth code for tokens (PKCE flow)
    */
   async function exchangeCodeForTokens(code: string) {
-    const codeVerifier = localStorage.getItem('pkce_code_verifier')
-    const redirectUri = localStorage.getItem('pkce_redirect_uri')
+    const { settings, set } = getSettings()
+    const codeVerifier = settings.value.pkceCodeVerifier
+    const redirectUri = settings.value.pkceRedirectUri
 
     if (!codeVerifier || !redirectUri) {
       throw new Error('Missing PKCE state')
@@ -522,9 +508,9 @@ export const useAuthStore = defineStore('auth', () => {
     saveTokens(tokens)
 
     // Clean up PKCE state
-    localStorage.removeItem('pkce_code_verifier')
-    localStorage.removeItem('pkce_session')
-    localStorage.removeItem('pkce_redirect_uri')
+    await set('pkceCodeVerifier', null)
+    await set('pkceSession', null)
+    await set('pkceRedirectUri', null)
   }
 
   /**
@@ -557,14 +543,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     // Verify state
-    const storedState = localStorage.getItem('pkce_state')
+    const { settings, set } = getSettings()
+    const storedState = settings.value.pkceState
     if (state !== storedState) {
       error.value = 'State mismatch - possible CSRF attack'
       return false
     }
 
     // Get stored verifier
-    const codeVerifier = localStorage.getItem('pkce_code_verifier')
+    const codeVerifier = settings.value.pkceCodeVerifier
     if (!codeVerifier) {
       error.value = 'No code verifier found - auth flow corrupted'
       return false
@@ -597,8 +584,8 @@ export const useAuthStore = defineStore('auth', () => {
       saveTokens(tokens)
 
       // Clean up PKCE storage
-      localStorage.removeItem('pkce_code_verifier')
-      localStorage.removeItem('pkce_state')
+      await set('pkceCodeVerifier', null)
+      await set('pkceState', null)
 
       // Clear URL params
       window.history.replaceState({}, document.title, window.location.pathname)
@@ -657,7 +644,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Save tokens to state, localStorage, and persistent file
+   * Save tokens to state and settings
    */
   async function saveTokens(tokens: {
     access_token: string
@@ -671,26 +658,17 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = tokens.access_token
     tokenExpiry.value = expiryDate
 
-    // Save to localStorage (fast access during session)
-    localStorage.setItem('spotifyAccessToken', tokens.access_token)
-    localStorage.setItem('spotifyTokenExpiry', expiryDate.toISOString())
-    localStorage.setItem('spotifyAuthType', 'pkce')
-
     if (tokens.refresh_token) {
       refreshToken.value = tokens.refresh_token
-      localStorage.setItem('spotifyRefreshToken', tokens.refresh_token)
     }
 
-    // Also save to settings.json (persists across reboots on device)
-    if (!IS_DEV_MODE) {
-      log.info('Saving to settings.json...')
-      const { set } = getSettings()
-      await set('accessToken', tokens.access_token)
-      await set('tokenExpiry', expiryDate.toISOString())
-      if (tokens.refresh_token) {
-        await set('refreshToken', tokens.refresh_token)
-      }
-      log.success('Tokens saved to settings.json')
+    // Save to settings (persists across reboots)
+    log.info('Saving to settings...')
+    const { set } = getSettings()
+    await set('accessToken', tokens.access_token)
+    await set('tokenExpiry', expiryDate.toISOString())
+    if (tokens.refresh_token) {
+      await set('refreshToken', tokens.refresh_token)
     }
 
     log.success(`Tokens saved: access=${!!accessToken.value}, refresh=${!!refreshToken.value}`)
@@ -706,21 +684,16 @@ export const useAuthStore = defineStore('auth', () => {
     tokenExpiry.value = null
     error.value = null
 
-    localStorage.removeItem('spotifyAccessToken')
-    localStorage.removeItem('spotifyRefreshToken')
-    localStorage.removeItem('spotifyTokenExpiry')
-    localStorage.removeItem('spotifyAuthType')
-    localStorage.removeItem('pkce_code_verifier')
-    localStorage.removeItem('pkce_state')
-
-    // Also clear from settings.json
-    if (!IS_DEV_MODE) {
-      log.warn('Clearing tokens from settings.json')
-      const { set } = getSettings()
-      await set('accessToken', null)
-      await set('refreshToken', null)
-      await set('tokenExpiry', null)
-    }
+    // Clear all auth data from settings
+    log.warn('Clearing tokens from settings')
+    const { set } = getSettings()
+    await set('accessToken', null)
+    await set('refreshToken', null)
+    await set('tokenExpiry', null)
+    await set('pkceCodeVerifier', null)
+    await set('pkceState', null)
+    await set('pkceSession', null)
+    await set('pkceRedirectUri', null)
   }
 
   /**
@@ -754,6 +727,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isTokenExpired,
     tokenReady,
+    isConnected,
 
     // Actions
     initFromStorage,

@@ -28,7 +28,8 @@ export function createNetworkComponent(): BootComponent {
   const isReady = computed(() => network.isConnected.value === true)
 
   /**
-   * Startup: register listeners, then loop until connected
+   * Startup: register listeners, then loop until connected with stable connection
+   * Requires 2 consecutive successful pings to handle BT tethering stabilization
    */
   async function startup(): Promise<void> {
     log.info('startup() - registering listeners...')
@@ -38,21 +39,39 @@ export function createNetworkComponent(): BootComponent {
     network.registerListeners()
     log.info('Browser online/offline listeners registered')
 
-    log.info('Waiting for network (ping every 1s)...')
+    log.info('Waiting for stable network (max 15s)...')
     let attempts = 0
+    let consecutiveSuccesses = 0
+    const MAX_ATTEMPTS = 15
+    const REQUIRED_SUCCESSES = 2  // Need 2 successful pings in a row
 
-    // Loop: check every 1s until connected
-    // Use refresh() which updates initialCheckDone for UI bubble
+    // Loop: check every 1s until we get consecutive successes or timeout
     await waitUntilReady(async () => {
       attempts++
       await network.refresh()
       const connected = network.isConnected.value === true
+
       if (connected) {
-        log.success(`Network connected after ${attempts} attempt(s)!`)
-      } else if (attempts % 5 === 0) {
-        log.warn(`Still waiting for network... (${attempts} attempts)`)
+        consecutiveSuccesses++
+        log.info(`Ping ${attempts} OK (${consecutiveSuccesses}/${REQUIRED_SUCCESSES})`)
+
+        if (consecutiveSuccesses >= REQUIRED_SUCCESSES) {
+          log.success(`Network stable after ${attempts} attempts!`)
+          return true
+        }
+      } else {
+        if (consecutiveSuccesses > 0) {
+          log.warn(`Ping ${attempts} failed, resetting counter`)
+        }
+        consecutiveSuccesses = 0
       }
-      return connected
+
+      if (attempts >= MAX_ATTEMPTS) {
+        log.warn(`Network timeout after ${MAX_ATTEMPTS} attempts`)
+        return true  // Exit loop, isConnected reflects last state
+      }
+
+      return false
     }, 1000)
 
     // Network confirmed working, now init

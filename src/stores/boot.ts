@@ -48,11 +48,11 @@ export const useBootStore = defineStore('boot', () => {
     }
   }
 
-  // Computed: critical components ready (settings + auth)
+  // Computed: critical components ready (settings only - for loading screen)
+  // Network + Auth happen in background after loading screen completes
   const criticalReady = computed(() => {
     const settings = settingsComponent.value
-    const auth = authComponent.value
-    return (settings?.isReady.value ?? false) && (auth?.isReady.value ?? false)
+    return settings?.isReady.value ?? false
   })
 
   // Computed: network ready

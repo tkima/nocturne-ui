@@ -5,6 +5,9 @@ import './index.css'
 import App from './App.vue'
 import { initDebugFromSettings } from './utils/debug'
 
+// Import test utilities (registers on window for console access)
+import './boot/testAuthBoot'
+
 // Initialize debug early from env variable so boot logs are captured
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG_ENABLED === 'true'
 initDebugFromSettings(() => DEBUG_ENABLED)

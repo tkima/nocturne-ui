@@ -136,12 +136,6 @@ const artistName = computed(() => {
   if (artists?.length) {
     return artists.map(a => a.name).join(', ')
   }
-  // Fallback: check cache for this track (cached in spotify store)
-  const trackId = playback.value?.item?.id
-  if (trackId) {
-    const cached = localStorage.getItem(`artist_cache_${trackId}`)
-    if (cached) return cached
-  }
   return 'Unknown Artist'
 })
 

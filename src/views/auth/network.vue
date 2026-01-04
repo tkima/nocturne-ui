@@ -130,10 +130,21 @@ function navigateBack() {
 // ------------------------------------------------------------
 // Wi-Fi Actions
 // ------------------------------------------------------------
+// Load known WiFi networks from env (for auto-fill)
+const knownNetworks: Array<{ ssid: string; password: string }> = (() => {
+  try {
+    const raw = import.meta.env.VITE_WIFI_NETWORKS
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore parse errors */ }
+  return []
+})()
+
 async function handleNetworkClick(netw: { ssid: string; flags: string }) {
   if (wifi.hasPasswordSecurity(netw.flags)) {
     selectedNetwork.value = netw
-    passwordInput.value = ''
+    // Auto-fill password for known networks
+    const known = knownNetworks.find(n => n.ssid === netw.ssid)
+    passwordInput.value = known?.password || ''
     passwordError.value = ''
     showPasswordModal.value = true
     // Show keyboard after modal animation
@@ -145,8 +156,12 @@ async function handleNetworkClick(netw: { ssid: string; flags: string }) {
     const success = await wifi.connectToNetwork(netw.ssid)
     if (success) {
       toast.success(`Connected to ${netw.ssid}`)
+      // Retry network check a few times until connected
       setTimeout(async () => {
-        await network.refresh()
+        for (let i = 0; i < 5 && !network.isConnected.value; i++) {
+          await network.refresh()
+          if (!network.isConnected.value) await new Promise(r => setTimeout(r, 1000))
+        }
       }, 1500)
     } else {
       toast.error('Connection failed')
@@ -173,10 +188,12 @@ async function handlePasswordSubmit() {
     showPasswordModal.value = false
     selectedNetwork.value = null
     passwordInput.value = ''
-    // Trigger network check to detect internet connectivity
-    // Small delay to let WiFi connection fully establish before checking
+    // Retry network check a few times until connected
     setTimeout(async () => {
-      await network.refresh()
+      for (let i = 0; i < 5 && !network.isConnected.value; i++) {
+        await network.refresh()
+        if (!network.isConnected.value) await new Promise(r => setTimeout(r, 1000))
+      }
     }, 1500)
   } else {
     // Show error and keyboard again on failure

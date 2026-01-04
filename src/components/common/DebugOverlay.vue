@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { debugLogs, clearDebugLogs, debugCategory } from '@/utils/debug'
+import { debugLogs, clearDebugLogs, debugCategory, sessionId } from '@/utils/debug'
 import { useBluetooth } from '@/composables/useBluetooth'
 import { useSettings } from '@/composables/useSettings'
 
 const bluetooth = useBluetooth()
 const { get: getSetting, isLoaded } = useSettings()
 
-// Start expanded by default
-const isExpanded = ref(true)
+// Start minimized by default
+const isExpanded = ref(false)
 
 // Available categories from logs
 const categories = computed(() => {
@@ -16,12 +16,17 @@ const categories = computed(() => {
   return ['All', ...Array.from(cats)]
 })
 
-// Filtered logs
+// Filtered logs - only show current session
 const filteredLogs = computed(() => {
-  if (!debugCategory.value || debugCategory.value === 'All') {
-    return debugLogs.value
+  // Only show logs from current session
+  let logs = debugLogs.value.filter(l => l.session === sessionId)
+
+  // Filter by category
+  if (debugCategory.value && debugCategory.value !== 'All') {
+    logs = logs.filter(l => l.category === debugCategory.value)
   }
-  return debugLogs.value.filter(l => l.category === debugCategory.value)
+
+  return logs
 })
 
 // BT status summary (for quick view in header)
@@ -56,6 +61,7 @@ function setCategory(cat: string) {
     >
       <div class="flex items-center gap-4">
         <span class="font-bold text-blue-400 text-[16px]">DEBUG</span>
+        <span class="text-purple-400 font-bold">{{ sessionId }}</span>
         <span :class="btStatus.wsConnected ? 'text-green-400' : 'text-red-400'">
           WS:{{ btStatus.wsConnected ? 'OK' : 'X' }}
         </span>
@@ -82,7 +88,8 @@ function setCategory(cat: string) {
     <!-- Expandable content -->
     <div v-if="isExpanded" class="flex flex-col h-[calc(70vh-50px)]">
       <!-- Category filter tabs -->
-      <div class="flex gap-2 px-3 py-2 border-b border-white/10 overflow-x-auto">
+      <div class="flex gap-2 px-3 py-2 border-b border-white/10 overflow-x-auto items-center">
+        <span class="text-white/40 text-[12px] shrink-0">Category:</span>
         <button
           v-for="cat in categories"
           :key="cat"
@@ -109,7 +116,7 @@ function setCategory(cat: string) {
             'text-yellow-400': log.type === 'warn'
           }"
         >
-          <span class="text-white/40 shrink-0 w-[100px]">{{ log.time }}</span>
+          <span class="text-white/40 shrink-0 w-[70px]">{{ log.time }}</span>
           <span class="text-blue-400/60 shrink-0 w-[80px]">[{{ log.category }}]</span>
           <span>{{ log.message }}</span>
         </div>

@@ -109,8 +109,11 @@ onMounted(async () => {
 
   setupGlobalKeys()
 
+  // Wait 1s for device to stabilize before starting boot
+  await new Promise(resolve => setTimeout(resolve, 1000))
+
   // Start the unified boot sequence
-  // This handles: Settings → Auth (critical) → Network → Bluetooth (background)
+  // This handles: Settings → Bluetooth → Network → Auth
   await startBoot()
   log.info(`Boot complete: criticalReady=${bootStore.criticalReady}, auth=${authStore.isAuthenticated}`)
 })
@@ -139,21 +142,21 @@ function handleReboot() {
 async function handleLoadingComplete() {
   showLoader.value = false
 
-  log.info(`Route decision: auth=${authStore.isAuthenticated}, netReady=${bootStore.networkReady}, startNP=${settings.value.startWithNowPlaying}`)
+  // Check if we have saved tokens (auth validation happens in background)
+  const hasTokens = !!settings.value.accessToken && !!settings.value.refreshToken
 
-  if (authStore.isAuthenticated) {
-    // Check if user prefers to start with Now Playing
+  log.info(`Route decision: hasTokens=${hasTokens}, auth=${authStore.isAuthenticated}, startNP=${settings.value.startWithNowPlaying}`)
+
+  if (hasTokens) {
+    // We have tokens - go to main app, auth validates in background
     const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/recents'
-    log.info(`Authenticated -> ${startRoute} (current: ${route.path})`)
-    // Only navigate if we're not already on the correct route
+    log.info(`Has tokens -> ${startRoute}`)
     if (route.path !== startRoute) {
       router.replace(startRoute)
     }
-  } else if (!bootStore.networkReady) {
-    log.info('No network -> /auth/network')
-    router.replace('/auth/network')
   } else if (!isPublicPath()) {
-    log.info('Not authenticated -> /auth/login')
+    // No tokens - go to login (network check happens in background)
+    log.info('No tokens -> /auth/login')
     router.replace('/auth/login')
   }
 }

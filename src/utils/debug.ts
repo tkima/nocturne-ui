@@ -7,6 +7,19 @@ import { ref } from 'vue'
 // Check env variable directly - works at module load time
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG_ENABLED === 'true'
 
+// Generate a random 6-letter session ID for this boot
+function generateSessionId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  let result = ''
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return result
+}
+
+// Session ID for this boot (generated once on module load)
+export const sessionId = generateSessionId()
+
 // Legacy function for backwards compatibility
 export function initDebugFromSettings(_getter: () => boolean) {
   // No-op - we use env variable directly now
@@ -14,13 +27,30 @@ export function initDebugFromSettings(_getter: () => boolean) {
 
 export interface DebugLogEntry {
   time: string
+  session: string
   category: string
   message: string
   type: 'info' | 'success' | 'error' | 'warn'
 }
 
+// Load persisted logs from localStorage on startup
+function loadPersistedLogs(): DebugLogEntry[] {
+  if (!DEBUG_ENABLED) return []
+  try {
+    const saved = localStorage.getItem('debug_logs')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed)) {
+        return parsed
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return []
+}
+
 // Shared debug logs (accessible from debug overlay)
-export const debugLogs = ref<DebugLogEntry[]>([])
+// Initialize with persisted logs so they survive browser restarts
+export const debugLogs = ref<DebugLogEntry[]>(loadPersistedLogs())
 
 // Category filter for overlay
 export const debugCategory = ref<string | null>(null)
@@ -40,20 +70,30 @@ export function addDebugLog(
   if (!DEBUG_ENABLED) return
 
   const now = new Date()
-  const time = now.toLocaleTimeString('en-US', { hour12: false }) + '.' +
-    now.getMilliseconds().toString().padStart(3, '0')
+  const hours = now.getHours().toString().padStart(2, '0')
+  const minutes = now.getMinutes().toString().padStart(2, '0')
+  const seconds = now.getSeconds().toString().padStart(2, '0')
+  const time = `${hours}:${minutes}:${seconds}`
 
-  debugLogs.value.unshift({ time, category, message, type })
+  debugLogs.value.unshift({ time, session: sessionId, category, message, type })
 
-  // Keep max 500 entries to prevent memory leaks
-  if (debugLogs.value.length > 500) {
+  // Keep max 1000 entries to allow debugging across multiple restarts
+  if (debugLogs.value.length > 1000) {
     debugLogs.value.pop()
   }
 
-  // Save to localStorage for post-mortem debugging
+  // Persist ALL logs to localStorage for debugging across restarts
   try {
     localStorage.setItem('debug_logs', JSON.stringify(debugLogs.value))
-  } catch { /* ignore */ }
+  } catch (e) {
+    // If localStorage is full, trim older entries and retry
+    if (debugLogs.value.length > 200) {
+      debugLogs.value = debugLogs.value.slice(0, 200)
+      try {
+        localStorage.setItem('debug_logs', JSON.stringify(debugLogs.value))
+      } catch { /* give up */ }
+    }
+  }
 }
 
 /**

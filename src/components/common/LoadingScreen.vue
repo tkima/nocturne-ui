@@ -44,10 +44,10 @@ const progress = computed(() => {
 watch(completedTasks, (count) => {
   if (count === tasksTotal && !completeCalled) {
     completeCalled = true
-    // Small delay before completing
+    // 1s delay before completing to let things stabilize
     setTimeout(() => {
       emit('complete')
-    }, 500)
+    }, 1000)
   }
 })
 

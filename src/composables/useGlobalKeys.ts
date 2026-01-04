@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useSpotifyStore } from '@/stores/spotify'
 import { getPreset } from '@/composables/useButtonMapping'
+import { useSettings, type ButtonMapping } from '@/composables/useSettings'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 
@@ -85,7 +86,7 @@ export function useGlobalKeys() {
   // ------------------------------------------------------------
   // Button 1-4 Handlers (presets)
   // ------------------------------------------------------------
-  function saveButtonMapping(buttonNumber: string) {
+  async function saveButtonMapping(buttonNumber: string) {
     const { id, type, image, name } = uiStore.mappableContent
 
     if (!id || !type) {
@@ -93,10 +94,20 @@ export function useGlobalKeys() {
       return
     }
 
-    localStorage.setItem(`button${buttonNumber}Id`, id)
-    localStorage.setItem(`button${buttonNumber}Type`, type)
-    localStorage.setItem(`button${buttonNumber}Image`, image || '')
-    localStorage.setItem(`button${buttonNumber}Name`, name || '')
+    const { settings, set } = useSettings()
+    const index = parseInt(buttonNumber) - 1 // Convert "1"-"4" to 0-3
+    const mapping: ButtonMapping = {
+      id,
+      type,
+      image: image || null,
+      name: name || null,
+    }
+
+    const newMappings: (ButtonMapping | null)[] = settings.value.buttonMappings.map(m =>
+      m ? { ...m, tracks: m.tracks ? [...m.tracks] : null } : null
+    )
+    newMappings[index] = mapping
+    await set('buttonMappings', newMappings)
 
     logger.info('Button mapping saved', { button: buttonNumber, id, type, name })
   }
@@ -170,9 +181,8 @@ export function useGlobalKeys() {
           contextUri = `spotify:show:${preset.id}`
           break
         case 'liked-songs':
-          const tracksJson = localStorage.getItem(`button${buttonNumber}Tracks`)
-          if (tracksJson) {
-            uris = JSON.parse(tracksJson)
+          if (preset.tracks && preset.tracks.length > 0) {
+            uris = [...preset.tracks]
           }
           break
       }

@@ -3,7 +3,9 @@
 // ============================================================
 
 import { ref, readonly } from 'vue'
+import { createLogger } from '@/utils/debug'
 
+const log = createLogger('Settings')
 const NOCTURNED_URL = 'http://127.0.0.1:5000'
 const IS_DEV = import.meta.env.DEV
 
@@ -13,6 +15,7 @@ export interface ButtonMapping {
   type: string | null
   image: string | null
   name: string | null
+  tracks?: string[] | null  // For liked-songs URIs
 }
 
 // Default settings values
@@ -30,10 +33,17 @@ const DEFAULT_SETTINGS: Settings = {
   showStatusBar: true,
   // Debug
   debugOverlayEnabled: false,
-  // Auth tokens (persisted across reboots)
+  // Auth (persisted across reboots)
+  spotifyClientId: null,
+  spotifyAuthType: null,
   accessToken: null,
   refreshToken: null,
   tokenExpiry: null,
+  // PKCE auth state (temporary, cleared after auth completes)
+  pkceCodeVerifier: null,
+  pkceState: null,
+  pkceSession: null,
+  pkceRedirectUri: null,
   // Button mappings (1-4)
   buttonMappings: [null, null, null, null],
   // Bluetooth
@@ -54,10 +64,17 @@ export interface Settings {
   showStatusBar: boolean
   // Debug
   debugOverlayEnabled: boolean
-  // Auth tokens
+  // Auth
+  spotifyClientId: string | null
+  spotifyAuthType: string | null
   accessToken: string | null
   refreshToken: string | null
   tokenExpiry: string | null
+  // PKCE auth state (temporary, cleared after auth completes)
+  pkceCodeVerifier: string | null
+  pkceState: string | null
+  pkceSession: string | null
+  pkceRedirectUri: string | null
   // Button mappings (1-4)
   buttonMappings: (ButtonMapping | null)[]
   // Bluetooth
@@ -79,30 +96,30 @@ let loadingPromise: Promise<void> | null = null
 async function loadSettings(): Promise<void> {
   // If already loaded, return immediately
   if (isLoaded.value) {
-    console.log('[Settings] Already loaded, startWithNowPlaying =', settings.value.startWithNowPlaying)
+    log.info('Already loaded')
     return
   }
 
   // If loading is in progress, wait for it
   if (loadingPromise) {
-    console.log('[Settings] Loading in progress, waiting...')
+    log.info('Loading in progress, waiting...')
     return loadingPromise
   }
 
   // Start loading
-  console.log('[Settings] Starting load...')
+  log.info('Starting load...')
   loadingPromise = (async () => {
     try {
       if (IS_DEV) {
         // In dev mode, use localStorage
         const stored = localStorage.getItem('nocturne_settings')
-        console.log('[Settings] Dev mode, localStorage:', stored ? 'found' : 'not found')
+        log.info(`Dev mode, localStorage: ${stored ? 'found' : 'not found'}`)
         if (stored) {
           const parsed = JSON.parse(stored)
           settings.value = { ...DEFAULT_SETTINGS, ...parsed }
-          console.log('[Settings] Loaded from localStorage, startWithNowPlaying =', settings.value.startWithNowPlaying)
+          log.success('Loaded from localStorage')
         } else {
-          console.log('[Settings] Using defaults, startWithNowPlaying =', settings.value.startWithNowPlaying)
+          log.info('Using defaults')
         }
       } else {
         // On device, read settings.json with cache-busting
@@ -112,13 +129,13 @@ async function loadSettings(): Promise<void> {
         if (response.ok) {
           const parsed = await response.json()
           settings.value = { ...DEFAULT_SETTINGS, ...parsed }
-          console.log('[Settings] Loaded from file, startWithNowPlaying =', settings.value.startWithNowPlaying)
+          log.success('Loaded from file')
         } else {
-          console.log('[Settings] File not found, using defaults')
+          log.warn('File not found, using defaults')
         }
       }
     } catch (err) {
-      console.error('Failed to load settings:', err)
+      log.error(`Failed to load: ${err}`)
     }
 
     isLoaded.value = true
@@ -148,6 +165,7 @@ async function saveSettings(): Promise<boolean> {
       if (IS_DEV) {
         // In dev mode, use localStorage
         localStorage.setItem('nocturne_settings', JSON.stringify(settings.value))
+        log.success('Saved to localStorage')
         return true
       }
 
@@ -155,7 +173,7 @@ async function saveSettings(): Promise<boolean> {
       const settingsJson = JSON.stringify(settings.value, null, 2)
       const base64Content = btoa(settingsJson)
 
-      console.log('[Settings] Saving to device...')
+      log.info('Saving to device...')
 
       const response = await fetch(`${NOCTURNED_URL}/device/exec`, {
         method: 'POST',
@@ -166,7 +184,7 @@ async function saveSettings(): Promise<boolean> {
       })
 
       if (!response.ok) {
-        console.error('[Settings] Save failed:', response.status)
+        log.error(`Save failed: ${response.status}`)
         return false
       }
 
@@ -174,14 +192,14 @@ async function saveSettings(): Promise<boolean> {
       const cmdResult = result.results?.[0]
 
       if (cmdResult?.exit_code !== 0) {
-        console.error('[Settings] Save script failed:', cmdResult?.error || cmdResult?.output)
+        log.error(`Save script failed: ${cmdResult?.error || cmdResult?.output}`)
         return false
       }
 
-      console.log('[Settings] Saved successfully')
+      log.success('Saved to file')
       return true
     } catch (err) {
-      console.error('[Settings] Save error:', err)
+      log.error(`Save error: ${err}`)
       return false
     } finally {
       isSaving.value = false
