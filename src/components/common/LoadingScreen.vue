@@ -27,27 +27,17 @@ const bootStore = useBootStore()
 const bootCounterDone = ref(false)
 let completeCalled = false
 
-// Progress: 2 tasks - boot counter + criticalReady
-const tasksTotal = 2
-const completedTasks = computed(() => {
-  let count = 0
-  if (bootCounterDone.value) count++
-  if (bootStore.criticalReady) count++
-  return count
-})
+// Progress from boot store (0-100)
+const progress = computed(() => bootStore.progress)
 
-const progress = computed(() => {
-  return Math.floor((completedTasks.value / tasksTotal) * 100)
-})
-
-// Watch for completion
-watch(completedTasks, (count) => {
-  if (count === tasksTotal && !completeCalled) {
+// Watch for completion (bootCounterDone + criticalReady)
+watch([() => bootCounterDone.value, () => bootStore.criticalReady], ([counterDone, criticalReady]) => {
+  if (counterDone && criticalReady && !completeCalled) {
     completeCalled = true
-    // Small delay before completing
+    // 1s delay before completing to let things stabilize
     setTimeout(() => {
       emit('complete')
-    }, 500)
+    }, 1000)
   }
 })
 

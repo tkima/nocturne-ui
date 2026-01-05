@@ -290,11 +290,27 @@ function handleKeyDown(e: KeyboardEvent) {
    PROGRESS TRACKING & POLLING
    ============================================================ */
 
+let lastSyncedTrackId: string | null = null // Track ID we already synced near end
+
 function startProgressTracking() {
   if (progressInterval) clearInterval(progressInterval)
-  progressInterval = setInterval(() => {
+
+  progressInterval = setInterval(async () => {
     if (isPlaying.value && !isProgressScrubbing.value) {
+      // Stop at track end (don't overflow)
+      if (playbackProgress.value >= duration.value) return
       playbackProgress.value += 1000
+
+      // Sync 10s before track ends (once per track)
+      const currentTrackId = playback.value?.item?.id || null
+      const remaining = duration.value - playbackProgress.value
+      if (remaining > 0 && remaining <= 10000 && currentTrackId !== lastSyncedTrackId) {
+        lastSyncedTrackId = currentTrackId
+        await spotifyStore.fetchCurrentPlayback()
+        if (playback.value) {
+          playbackProgress.value = playback.value.progress_ms || 0
+        }
+      }
     }
   }, 1000)
 }

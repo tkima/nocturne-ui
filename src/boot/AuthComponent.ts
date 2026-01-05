@@ -10,6 +10,7 @@ import { ref, computed, readonly } from 'vue'
 import type { BootComponent, BootStatus } from './types'
 import { useAuthStore } from '@/stores/auth'
 import { useSettings } from '@/composables/useSettings'
+import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('AuthBoot')
@@ -49,6 +50,7 @@ export function createAuthComponent(): BootComponent {
 
   const authStore = useAuthStore()
   const { settings } = useSettings()
+  const toast = useToast()
 
   // isReady means "auth init is complete" (not "user is authenticated")
   // The app should show for unauthenticated users too (they see login screen)
@@ -87,6 +89,7 @@ export function createAuthComponent(): BootComponent {
             authStore.accessToken = null
             authStore.refreshToken = null
             authStore.tokenExpiry = null
+            toast.error('Authentication failed', 3000)
           } else {
             log.success('Token refreshed successfully')
           }

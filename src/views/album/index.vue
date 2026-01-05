@@ -83,12 +83,10 @@ async function handleTrackPlay(track: any, index: number) {
 
   logger.info('Play track', { trackUri: track.uri, index })
 
-  await spotifyStore.play({
+  spotifyStore.play({
     context_uri: `spotify:album:${albumId.value}`,
     offset: { position: index }
   })
-
-  spotifyStore.fetchPlaybackDebounced()
   router.push('/now-playing')
 }
 

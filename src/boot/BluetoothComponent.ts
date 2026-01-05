@@ -13,7 +13,9 @@ import { createLogger } from '@/utils/debug'
 const log = createLogger('BTBoot')
 
 // Check if Bluetooth is enabled via environment variable
-const BLUETOOTH_ENABLED = import.meta.env.VITE_BLUETOOTH_ENABLED !== 'false'
+// Also disable in dev mode (no nocturned daemon running)
+const IS_DEV = import.meta.env.DEV
+const BLUETOOTH_ENABLED = !IS_DEV && import.meta.env.VITE_BLUETOOTH_ENABLED !== 'false'
 
 // Singleton state
 const hasConnectedDevice = ref<boolean>(false)

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+import { startBoot } from '@/boot'
 
 // ============================================================
 // Network Connectivity Composable (Singleton)
@@ -76,6 +77,9 @@ export function useNetwork() {
       window.dispatchEvent(new Event('networkRestored'))
       const { onInternetConnected } = useBluetoothTrigger()
       onInternetConnected()
+
+      // Re-run Phase 2 to validate auth
+      startBoot('connect')
     }
   }
 

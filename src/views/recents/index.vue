@@ -6,7 +6,6 @@ import { onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
-import { useNetwork } from '@/composables/useNetwork'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
@@ -21,7 +20,6 @@ const log = createLogger('Recents')
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
-const { isConnected } = useNetwork()
 const { fastPollMode } = useBluetoothTrigger()
 
 // ------------------------------------------------------------
@@ -75,15 +73,10 @@ const recentItems = computed(() => {
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-async function handleItemClick(item: { id: string; type: 'album' | 'playlist' }) {
-  if (item.type === 'album') {
-    logger.info('Play album', { albumId: item.id })
-    await spotifyStore.play({ context_uri: `spotify:album:${item.id}` })
-  } else {
-    logger.info('Play playlist', { playlistId: item.id })
-    await spotifyStore.play({ context_uri: `spotify:playlist:${item.id}` })
-  }
-  await spotifyStore.fetchCurrentPlayback()
+function handleItemClick(item: { id: string; type: 'album' | 'playlist' }) {
+  const contextUri = `spotify:${item.type}:${item.id}`
+  logger.info(`Play ${item.type}`, { id: item.id })
+  spotifyStore.play({ context_uri: contextUri })
   router.push('/now-playing')
 }
 
@@ -144,16 +137,16 @@ async function fetchRecents() {
 }
 
 onMounted(() => {
-  if (authStore.isAuthenticated && isConnected.value) {
+  if (authStore.isAuthenticated) {
     fetchRecents()
   }
 })
 
-// Watch for network ready - wait 1s then fetch
-watch(isConnected, (connected) => {
-  if (connected && authStore.isAuthenticated && recentItems.value.length === 0) {
-    log.info('Network connected, fetching recents in 1s...')
-    setTimeout(() => fetchRecents(), 1000)
+// Watch for auth to complete (happens in background after page mounts)
+watch(() => authStore.isAuthenticated, (isAuth) => {
+  if (isAuth && recentItems.value.length === 0) {
+    log.info('Auth completed, fetching recents...')
+    fetchRecents()
   }
 })
 
