@@ -55,10 +55,10 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     bootStore.setProgress(10)
     await new Promise(resolve => setTimeout(resolve, 500))
     const authComponent = createAuthComponent()
-    bootStore.setProgress(20)   
-     await new Promise(resolve => setTimeout(resolve, 500))
+    bootStore.setProgress(20)
+    await new Promise(resolve => setTimeout(resolve, 500))
     const networkComponent = createNetworkComponent()
-    bootStore.setProgress(30)    
+    bootStore.setProgress(30)
     await new Promise(resolve => setTimeout(resolve, 500))
     const bluetoothComponent = createBluetoothComponent()
 
@@ -77,7 +77,7 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 1000))
     if (!settingsOk) {
       log.error('Settings failed to load - boot may fail!')
-    } 
+    }
     bootStore.setProgress(100)
 
     // Mark critical phase done - loading screen will complete
