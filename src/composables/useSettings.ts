@@ -4,6 +4,7 @@
 
 import { ref, readonly } from 'vue'
 import { createLogger } from '@/utils/debug'
+import { useToast } from '@/composables/useToast'
 
 const log = createLogger('Settings')
 const NOCTURNED_URL = 'http://127.0.0.1:5000'
@@ -85,6 +86,7 @@ export interface Settings {
 const settings = ref<Settings>({ ...DEFAULT_SETTINGS })
 const isLoaded = ref(false)
 const isSaving = ref(false)
+const loadSucceeded = ref(false)  // Track if settings.json was found
 
 // Promise to track loading completion (allows multiple callers to await)
 let loadingPromise: Promise<void> | null = null
@@ -117,21 +119,42 @@ async function loadSettings(): Promise<void> {
         if (stored) {
           const parsed = JSON.parse(stored)
           settings.value = { ...DEFAULT_SETTINGS, ...parsed }
+          loadSucceeded.value = true
           log.success('Loaded from localStorage')
         } else {
+          loadSucceeded.value = true  // OK to save in dev mode even if no prior settings
           log.info('Using defaults')
         }
       } else {
-        // On device, read settings.json with cache-busting
-        const response = await fetch('/settings.json?t=' + Date.now(), {
-          cache: 'no-store'
-        })
-        if (response.ok) {
-          const parsed = await response.json()
-          settings.value = { ...DEFAULT_SETTINGS, ...parsed }
-          log.success('Loaded from file')
-        } else {
-          log.warn('File not found, using defaults')
+        // On device, read settings.json with retries
+        let loaded = false
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const response = await fetch('/settings.json?t=' + Date.now(), {
+            cache: 'no-store'
+          })
+          if (response.ok) {
+            const parsed = await response.json()
+            settings.value = { ...DEFAULT_SETTINGS, ...parsed }
+            loadSucceeded.value = true
+            loaded = true
+            log.success('Loaded from file')
+            break
+          }
+          if (attempt < 3) {
+            log.warn(`settings.json not found, retrying... (${3 - attempt} left)`)
+            await new Promise(r => setTimeout(r, 1000))
+          }
+        }
+        if (!loaded) {
+          loadSucceeded.value = false  // Block saves - file not found
+          log.error('settings.json not found after 3 attempts! Saves will be blocked.')
+          // Show toast to user
+          try {
+            const toast = useToast()
+            toast.error('settings.json not found - settings cannot be saved', 5000)
+          } catch {
+            // Toast may not be available during early boot
+          }
         }
       }
     } catch (err) {
@@ -153,6 +176,12 @@ let savePromise: Promise<boolean> | null = null
  * Queues saves to prevent concurrent writes
  */
 async function saveSettings(): Promise<boolean> {
+  // Block saves if settings.json was never loaded successfully (prevents overwriting with defaults)
+  if (!loadSucceeded.value) {
+    log.warn('Blocking save - settings.json was not found, cannot save to prevent data loss')
+    return false
+  }
+
   // If a save is in progress, wait for it then save again with latest values
   if (savePromise) {
     await savePromise
