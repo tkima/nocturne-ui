@@ -85,11 +85,11 @@ export function createAuthComponent(): BootComponent {
           log.warn('Token invalid, trying refresh...')
           const refreshed = await authStore.refreshAccessToken()
           if (!refreshed) {
-            log.error('Token refresh failed, clearing tokens')
-            authStore.accessToken = null
-            authStore.refreshToken = null
-            authStore.tokenExpiry = null
-            toast.error('Authentication failed', 3000)
+            // Don't clear tokens here - they may still be valid
+            // (e.g. Spotify returned 500/429/503 temporarily)
+            // Only invalid_grant clears tokens (via logout() in auth store)
+            // The 5-minute polling will retry refresh later
+            log.warn('Token refresh failed - keeping tokens for retry')
           } else {
             log.success('Token refreshed successfully')
           }
