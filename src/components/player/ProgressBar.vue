@@ -3,6 +3,7 @@
      ============================================================ -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { formatTime } from '@/utils/format'
 
 // ------------------------------------------------------------
 // Props
@@ -43,13 +44,6 @@ const shouldShowTimestampOutside = computed(() => finalProgress.value < 8)
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
-
 function handleClick() {
   isScrubbing.value = true
   emit('scrubbingChange', true)

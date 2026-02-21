@@ -15,6 +15,13 @@ export const useBootStore = defineStore('boot', () => {
   const bluetoothComponent = shallowRef<BootComponent | null>(null)
 
   const bootPhase = ref<'idle' | 'starting' | 'critical' | 'ready'>('idle')
+  const loadingComplete = ref(false)
+  const progress = ref(0)
+
+  // Set loading bar progress (0-100)
+  function setProgress(percent: number) {
+    progress.value = Math.min(100, Math.max(0, percent))
+  }
 
   // Register a component
   function registerComponent(component: BootComponent) {
@@ -70,6 +77,10 @@ export const useBootStore = defineStore('boot', () => {
     return criticalReady.value && networkReady.value
   })
 
+  function markLoadingComplete() {
+    loadingComplete.value = true
+  }
+
   return {
     // Components
     settingsComponent,
@@ -77,8 +88,12 @@ export const useBootStore = defineStore('boot', () => {
     networkComponent,
     bluetoothComponent,
     bootPhase,
+    loadingComplete,
+    progress,
+    setProgress,
     registerComponent,
     getComponent,
+    markLoadingComplete,
     criticalReady,
     networkReady,
     bluetoothReady,

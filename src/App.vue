@@ -75,31 +75,14 @@ const showNoConnectionBubble = computed(() =>
 )
 
 // ------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------
-function isPublicPath(): boolean {
-  const path = window.location.pathname
-  return path.startsWith('/auth/') || path.startsWith('/test')
-}
-
-// ------------------------------------------------------------
 // Watchers
 // ------------------------------------------------------------
+// Auth lost while on a protected route → redirect to login
 watch(() => authStore.isAuthenticated, (isAuth) => {
-  // Only redirect if loading is complete (avoid race during boot)
-  if (!isAuth && !showLoader.value && !isPublicPath()) {
+  if (!isAuth && bootStore.loadingComplete && !route.path.startsWith('/auth/') && !route.path.startsWith('/test')) {
     router.replace('/auth/login')
   }
 })
-
-watch(
-  () => network.isConnected.value,
-  (connected) => {
-    if (connected && route.path === '/auth/network' && !authStore.isAuthenticated) {
-      router.replace('/auth/login')
-    }
-  }
-)
 
 
 // ------------------------------------------------------------
@@ -142,22 +125,23 @@ function handleReboot() {
 
 async function handleLoadingComplete() {
   showLoader.value = false
+  bootStore.markLoadingComplete()
 
-  // Check if we have saved tokens (auth validation happens in background)
-  const hasTokens = !!settings.value.accessToken && !!settings.value.refreshToken
+  // By now Phase 2 is complete: network checked + auth validated
+  const isAuth = authStore.isAuthenticated
 
-  log.info(`Route decision: hasTokens=${hasTokens}, auth=${authStore.isAuthenticated}, startNP=${settings.value.startWithNowPlaying}`)
+  log.info(`Route decision: auth=${isAuth}, network=${network.isConnected.value}, startNP=${settings.value.startWithNowPlaying}`)
 
-  if (hasTokens) {
-    // We have tokens - go to main app, auth validates in background
+  if (isAuth) {
+    // Auth validated - go to main app
     const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/recents'
-    log.info(`Has tokens -> ${startRoute}`)
+    log.info(`Authenticated -> ${startRoute}`)
     if (route.path !== startRoute) {
       router.replace(startRoute)
     }
-  } else if (!isPublicPath()) {
-    // No tokens - go to login (network check happens in background)
-    log.info('No tokens -> /auth/login')
+  } else {
+    // Not authenticated (no tokens, invalid tokens, or no network) - go to login
+    log.info('Not authenticated -> /auth/login')
     router.replace('/auth/login')
   }
 }

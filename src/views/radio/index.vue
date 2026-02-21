@@ -2,7 +2,7 @@
      Top Tracks View - User's most played tracks
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
@@ -42,11 +42,11 @@ async function handleTrackClick(track: Track, index: number) {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await spotifyStore.fetchTopTracks()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>

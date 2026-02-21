@@ -68,11 +68,6 @@ const displayError = computed(() => {
 // Auth initialization
 // ------------------------------------------------------------
 async function initAuth() {
-  if (authStore.isAuthenticated) {
-    router.push('/recents')
-    return
-  }
-
   // Wait for network to be confirmed connected (not null/unknown, not false)
   if (network.isConnected.value !== true) {
     console.log('Auth: waiting for network connection...')
@@ -155,17 +150,13 @@ onMounted(async () => {
   // Set auth gradient
   uiStore.setGradientColors(['#1a4a3a', '#2d1f3d'])
 
-  // Check if already authenticated (tokens loaded by boot system)
-  if (authStore.isAuthenticated) {
-    router.push('/recents')
+  // If network is already connected, start auth flow
+  // Otherwise, the network watcher will trigger it when connected
+  // (Guard prevents reaching here if already authenticated)
+  if (network.isConnected.value === true) {
+    initAuth()
   } else {
-    // If network is already connected, start auth flow
-    // Otherwise, the network watcher will trigger it when connected
-    if (network.isConnected.value === true) {
-      initAuth()
-    } else {
-      console.log('Auth: waiting for network to connect...')
-    }
+    console.log('Auth: waiting for network to connect...')
   }
 })
 

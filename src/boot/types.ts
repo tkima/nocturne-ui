@@ -27,10 +27,10 @@ export interface BootComponent {
   /** Optional: attempt reconnection */
   reconnect?(): Promise<boolean>
 
-  /** Optional: start polling loop */
+  /** Optional: start polling loop (legacy — prefer useHeartbeat) */
   startPolling?(): void
 
-  /** Optional: stop polling loop */
+  /** Optional: stop polling loop (legacy — prefer useHeartbeat) */
   stopPolling?(): void
 }
 

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 import { startBoot } from '@/boot'
 
 // ============================================================
@@ -16,7 +17,6 @@ const initialCheckDone = ref(false)
 const hasEverConnectedThisSession = ref(false)
 const isChecking = ref(false)
 
-let pollIntervalId: ReturnType<typeof setInterval> | null = null
 let listenersRegistered = false
 
 // Check if bypass is enabled
@@ -24,6 +24,7 @@ const isBypassed = typeof localStorage !== 'undefined' &&
   localStorage.getItem(NETWORK_CHECK_BYPASS_KEY) === 'true'
 
 export function useNetwork() {
+  const heartbeat = useHeartbeat()
 
   // Perform network connectivity check
   async function checkConnectivity(): Promise<boolean> {
@@ -98,7 +99,7 @@ export function useNetwork() {
 
       if (connected) {
         stopPolling()
-      } else if (!pollIntervalId) {
+      } else {
         startPolling()
       }
     } finally {
@@ -107,15 +108,15 @@ export function useNetwork() {
   }
 
   function startPolling() {
-    if (pollIntervalId) return
-    pollIntervalId = setInterval(performCheck, POLL_INTERVAL)
+    heartbeat.register({
+      name: 'network-check',
+      interval: POLL_INTERVAL,
+      fn: performCheck,
+    })
   }
 
   function stopPolling() {
-    if (pollIntervalId) {
-      clearInterval(pollIntervalId)
-      pollIntervalId = null
-    }
+    heartbeat.unregister('network-check')
   }
 
   // Event handlers for browser online/offline events

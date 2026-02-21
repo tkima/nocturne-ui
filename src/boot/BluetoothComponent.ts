@@ -8,6 +8,8 @@ import type { BootComponent, BootStatus } from './types'
 import { waitUntilReady } from './types'
 import { useConfigStore } from '@/stores/config'
 import { useSettings } from '@/composables/useSettings'
+import { useBluetooth } from '@/composables/useBluetooth'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('BTBoot')
@@ -25,13 +27,11 @@ export function createBluetoothComponent(): BootComponent {
   const status = ref<BootStatus>('idle')
   const error = ref<string | null>(null)
 
-  let ws: WebSocket | null = null
-  let wsReconnectTimeout: ReturnType<typeof setTimeout> | null = null
-  let presenceInterval: ReturnType<typeof setTimeout> | null = null
   let devicePresent = false
 
   const config = useConfigStore()
   const { settings, loadSettings } = useSettings()
+  const heartbeat = useHeartbeat()
 
   const isReady = computed(() => hasConnectedDevice.value)
 
@@ -69,62 +69,6 @@ export function createBluetoothComponent(): BootComponent {
       return await response.json()
     } catch {
       return []
-    }
-  }
-
-  /**
-   * Connect WebSocket for pairing events
-   */
-  function connectWebSocket() {
-    if (ws && ws.readyState === WebSocket.OPEN) return
-
-    if (wsReconnectTimeout) {
-      clearTimeout(wsReconnectTimeout)
-      wsReconnectTimeout = null
-    }
-
-    try {
-      const wsUrl = config.nocturnedUrl.replace('http', 'ws') + '/ws'
-      ws = new WebSocket(wsUrl)
-
-      ws.onopen = () => {
-        wsConnected.value = true
-        log.success('WebSocket connected')
-      }
-
-      ws.onclose = () => {
-        wsConnected.value = false
-        wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
-      }
-
-      ws.onerror = () => {
-        log.error('WebSocket error')
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          handleWsMessage(data)
-        } catch { /* ignore */ }
-      }
-    } catch {
-      wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
-    }
-  }
-
-  /**
-   * Handle WebSocket messages
-   */
-  function handleWsMessage(data: { type: string; payload?: unknown }) {
-    const eventType = data.type.replace(/\\\\/g, '/').replace(/\\/g, '/')
-
-    if (eventType === 'bluetooth/connect') {
-      log.success('Device connected via WS')
-      hasConnectedDevice.value = true
-      devicePresent = true
-    } else if (eventType === 'bluetooth/disconnect' || eventType === 'bluetooth/disconnected') {
-      log.warn('Device disconnected via WS')
-      hasConnectedDevice.value = false
     }
   }
 
@@ -186,7 +130,7 @@ export function createBluetoothComponent(): BootComponent {
   }
 
   /**
-   * Startup: connect WebSocket, then loop until adapter ready
+   * Startup: connect WebSocket via composable, then loop until adapter ready
    */
   async function startup(): Promise<void> {
     log.info('startup() - BT_ENABLED=' + BLUETOOTH_ENABLED)
@@ -200,7 +144,9 @@ export function createBluetoothComponent(): BootComponent {
     status.value = 'starting'
     log.info('Connecting WebSocket to nocturned...')
 
-    connectWebSocket()
+    // Delegate WebSocket to the composable (single connection)
+    const bt = useBluetooth()
+    bt.ensureWebSocket()
 
     // Loop: check adapter every 1s until ready
     log.info('Waiting for BT adapter (check every 1s)...')
@@ -242,7 +188,7 @@ export function createBluetoothComponent(): BootComponent {
           hasConnectedDevice.value = true
           devicePresent = true
           status.value = 'ready'
-          startPolling()
+          registerPresencePolling()
           return true
         }
       } else {
@@ -265,11 +211,50 @@ export function createBluetoothComponent(): BootComponent {
     status.value = 'ready'
     error.value = null
 
-    // Start presence polling
-    startPolling()
+    // Start presence polling via heartbeat
+    registerPresencePolling()
 
     log.success('init() complete')
     return true
+  }
+
+  /**
+   * Register presence detection with the heartbeat service.
+   * - 15s when no device present
+   * - 5min when device present
+   */
+  function registerPresencePolling(): void {
+    if (!BLUETOOTH_ENABLED) return
+
+    log.info('Registering bt-presence with heartbeat')
+
+    heartbeat.register({
+      name: 'bt-presence',
+      interval: devicePresent ? 300000 : 15000,
+      fn: async () => {
+        const savedAddress = settings.value.lastBluetoothDevice
+        if (!savedAddress) return
+
+        const devices = await fetchDevices()
+        const found = devices.some(d => d.address === savedAddress)
+        const connected = devices.some(d => d.address === savedAddress && d.connected)
+
+        hasConnectedDevice.value = connected
+
+        if (found && !devicePresent) {
+          log.success('Device appeared, reconnecting...')
+          devicePresent = true
+          await tryReconnect()
+          // Re-register with longer interval
+          registerPresencePolling()
+        } else if (!found && devicePresent) {
+          log.warn('Device gone')
+          devicePresent = false
+          // Re-register with shorter interval
+          registerPresencePolling()
+        }
+      },
+    })
   }
 
   /**
@@ -282,62 +267,6 @@ export function createBluetoothComponent(): BootComponent {
     return success
   }
 
-  /**
-   * Presence detection polling
-   * - 3s when no device
-   * - 5min when device present
-   */
-  function startPolling(): void {
-    if (presenceInterval) return
-    if (!BLUETOOTH_ENABLED) return
-
-    log.info('Starting presence detection')
-
-    const runCheck = async () => {
-      const savedAddress = settings.value.lastBluetoothDevice
-      if (!savedAddress) {
-        // Schedule next check in 3s
-        presenceInterval = setTimeout(runCheck, 3000)
-        return
-      }
-
-      const devices = await fetchDevices()
-      const found = devices.some(d => d.address === savedAddress)
-      const connected = devices.some(d => d.address === savedAddress && d.connected)
-
-      hasConnectedDevice.value = connected
-
-      if (found && !devicePresent) {
-        // Device appeared - try reconnect
-        log.success('Device appeared, reconnecting...')
-        devicePresent = true
-        await tryReconnect()
-      } else if (!found && devicePresent) {
-        // Device disappeared
-        log.warn('Device gone')
-        devicePresent = false
-      }
-
-      // Schedule next check based on REAL status
-      const nextDelay = devicePresent ? 300000 : 3000 // 5min or 3s
-      presenceInterval = setTimeout(runCheck, nextDelay)
-    }
-
-    // First check after 5 seconds (give init time)
-    presenceInterval = setTimeout(runCheck, 5000)
-  }
-
-  /**
-   * Stop polling
-   */
-  function stopPolling(): void {
-    if (presenceInterval) {
-      clearTimeout(presenceInterval)
-      presenceInterval = null
-      log.info('Polling stopped')
-    }
-  }
-
   return {
     name: 'bluetooth',
     status: readonly(status),
@@ -346,8 +275,6 @@ export function createBluetoothComponent(): BootComponent {
     startup,
     init,
     reconnect,
-    startPolling,
-    stopPolling,
   }
 }
 

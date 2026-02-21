@@ -7,6 +7,7 @@ import { getPreset } from '@/composables/useButtonMapping'
 import { useSettings, type ButtonMapping } from '@/composables/useSettings'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
+import { buildSpotifyUri } from '@/utils/spotify'
 
 const LONG_PRESS_DURATION = 2000 // 2 seconds for long press to map
 
@@ -89,45 +90,10 @@ export function useGlobalKeys() {
   async function saveButtonMapping(buttonNumber: string) {
     // Fetch fresh playback data before saving
     await spotifyStore.fetchCurrentPlayback()
-    const playback = spotifyStore.currentPlayback
 
-    // Extract content from current playback
-    let id: string | null = null
-    let type: 'playlist' | 'album' | 'artist' | 'show' | 'liked-songs' | null = null
-    let image: string | null = null
-    let name: string | null = null
-
-    const contextUri = playback?.context?.uri
-    if (contextUri?.startsWith('spotify:playlist:')) {
-      id = contextUri.replace('spotify:playlist:', '')
-      type = 'playlist'
-    } else if (contextUri?.startsWith('spotify:album:')) {
-      id = contextUri.replace('spotify:album:', '')
-      type = 'album'
-    } else if (contextUri?.startsWith('spotify:show:')) {
-      id = contextUri.replace('spotify:show:', '')
-      type = 'show'
-    } else if (contextUri?.startsWith('spotify:artist:')) {
-      id = contextUri.replace('spotify:artist:', '')
-      type = 'artist'
-    } else if (playback?.item?.show?.id) {
-      // Episode without context - use show
-      id = playback.item.show.id
-      type = 'show'
-    } else if (playback?.item?.album?.id) {
-      // Track without context - use album
-      id = playback.item.album.id
-      type = 'album'
-    }
-
-    // Get image and name from playback
-    if (playback?.item) {
-      name = playback.item.name || null
-      image = playback.item.album?.images?.[0]?.url
-        || playback.item.images?.[0]?.url
-        || playback.item.show?.images?.[0]?.url
-        || null
-    }
+    const { id, type } = spotifyStore.parsedContext
+    const image = spotifyStore.albumArt || null
+    const name = spotifyStore.trackName || null
 
     if (!id || !type) {
       logger.warn('Cannot save button mapping - no mappable content', { id, type })
@@ -204,33 +170,12 @@ export function useGlobalKeys() {
     logger.info('Playing preset', { button: buttonNumber, ...preset })
 
     try {
-      let contextUri: string | undefined
-      let uris: string[] | undefined
-
-      switch (preset.type) {
-        case 'playlist':
-          contextUri = `spotify:playlist:${preset.id}`
-          break
-        case 'album':
-          contextUri = `spotify:album:${preset.id}`
-          break
-        case 'artist':
-          contextUri = `spotify:artist:${preset.id}`
-          break
-        case 'show':
-          contextUri = `spotify:show:${preset.id}`
-          break
-        case 'liked-songs':
-          if (preset.tracks && preset.tracks.length > 0) {
-            uris = [...preset.tracks]
-          }
-          break
-      }
-
-      if (contextUri) {
-        await spotifyStore.play({ context_uri: contextUri })
-      } else if (uris && uris.length > 0) {
-        await spotifyStore.play({ uris })
+      if (preset.type === 'liked-songs') {
+        if (preset.tracks && preset.tracks.length > 0) {
+          await spotifyStore.play({ uris: [...preset.tracks] })
+        }
+      } else {
+        await spotifyStore.play({ context_uri: buildSpotifyUri(preset.type, preset.id) })
       }
 
       // Navigate to now playing after successful playback

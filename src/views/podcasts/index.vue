@@ -2,7 +2,7 @@
      Podcasts View - User's saved podcast shows
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
@@ -34,11 +34,11 @@ function handleShowClick(showId: string) {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await spotifyStore.fetchUserShows()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>

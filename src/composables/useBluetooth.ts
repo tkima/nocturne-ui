@@ -312,7 +312,7 @@ export function useBluetooth() {
   // WEBSOCKET - For pairing events
   // ============================================================
 
-  function connectWebSocket() {
+  function ensureWebSocket() {
     if (ws && ws.readyState === WebSocket.OPEN) return
 
     if (wsReconnectTimeout) {
@@ -332,7 +332,7 @@ export function useBluetooth() {
       ws.onclose = () => {
         wsConnected.value = false
         log.warn('WebSocket disconnected')
-        wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
+        wsReconnectTimeout = setTimeout(ensureWebSocket, 3000)
       }
 
       ws.onerror = () => {
@@ -346,7 +346,7 @@ export function useBluetooth() {
         } catch { /* ignore */ }
       }
     } catch {
-      wsReconnectTimeout = setTimeout(connectWebSocket, 3000)
+      wsReconnectTimeout = setTimeout(ensureWebSocket, 3000)
     }
   }
 
@@ -396,7 +396,7 @@ export function useBluetooth() {
 
   async function initOnDemand() {
     log.info('On-demand init (network screen)')
-    connectWebSocket()
+    ensureWebSocket()
     await startDiscovery()
     await fetchDevices()
   }
@@ -434,6 +434,7 @@ export function useBluetooth() {
     stopReconnecting,
 
     // Init
+    ensureWebSocket,
     initOnDemand,
     refresh: fetchDevices,
   }

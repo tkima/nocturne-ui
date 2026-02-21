@@ -46,13 +46,20 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     log.success('       BOOT SEQUENCE STARTED')
     log.success('════════════════════════════════════════')
 
+    await new Promise(resolve => setTimeout(resolve, 2000))
     bootStore.bootPhase = 'starting'
-
+    bootStore.setProgress(0)
     // Create components
     log.info('Creating boot components...')
     const settingsComponent = createSettingsComponent()
+    bootStore.setProgress(10)
+    await new Promise(resolve => setTimeout(resolve, 500))
     const authComponent = createAuthComponent()
+    bootStore.setProgress(20)
+    await new Promise(resolve => setTimeout(resolve, 500))
     const networkComponent = createNetworkComponent()
+    bootStore.setProgress(30)
+    await new Promise(resolve => setTimeout(resolve, 500))
     const bluetoothComponent = createBluetoothComponent()
 
     // Register with store
@@ -63,13 +70,17 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     log.info('Components registered with boot store')
 
     log.info('[1/4] Settings...')
+    bootStore.setProgress(30)
     await settingsComponent.startup()
+    bootStore.setProgress(35)
     const settingsOk = await settingsComponent.init()
+    await new Promise(resolve => setTimeout(resolve, 1000))
     if (!settingsOk) {
       log.error('Settings failed to load - boot may fail!')
     }
+    bootStore.setProgress(40)
 
-    // Mark critical phase done - loading screen will complete
+    // Mark critical phase done (settings loaded, Phase 2 continues)
     bootStore.bootPhase = 'critical'
     const phase1Time = Date.now() - startTime
     log.success(`Phase 1 complete in ${phase1Time}ms - loading screen can close`)
@@ -108,12 +119,14 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
         })
     }
 
-    // Network + Auth in background (don't block UI)
-    log.info(`[3/4] Network (${phase === 'connect' ? 'reconnect' : 'background'}, max 15s)...`)
+    // Network + Auth (loading screen stays until complete)
+    log.info(`[3/4] Network (${phase === 'connect' ? 'reconnect' : 'checking'}, max 15s)...`)
+    bootStore.setProgress(50)
     networkComponent.startup()
       .then(async () => {
         const networkTime = Date.now() - startTime
         log.info(`Network complete in ${networkTime}ms, connected=${bootStore.networkReady}`)
+        bootStore.setProgress(75)
 
         // 4. Auth - only run if network connected
         if (bootStore.networkReady) {
@@ -135,11 +148,13 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
         } else {
           log.warn('[4/4] Auth skipped - no network')
         }
-
+        bootStore.setProgress(100)
         bootStore.bootPhase = 'ready'
       })
       .catch((e) => {
         log.error(`Network/Auth failed: ${e}`)
+        bootStore.setProgress(100)
+        bootStore.bootPhase = 'ready'
       })
   }
 }

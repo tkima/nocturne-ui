@@ -2,13 +2,15 @@
      Library View - Liked songs + User playlists
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
+import { formatCount } from '@/utils/format'
+import { buildSpotifyUri } from '@/utils/spotify'
 import type { Track } from '@/types'
 
 // ------------------------------------------------------------
@@ -28,10 +30,6 @@ const isLoading = computed(() => spotifyStore.isLoading)
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-function formatTrackCount(count: number): string {
-  return count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' Songs'
-}
-
 async function handleLikedSongsClick() {
   logger.info('Play liked songs')
   // Play saved tracks
@@ -45,21 +43,21 @@ async function handleLikedSongsClick() {
 
 function handlePlaylistClick(playlistId: string) {
   logger.info('Play playlist', { playlistId })
-  spotifyStore.play({ context_uri: `spotify:playlist:${playlistId}` })
+  spotifyStore.play({ context_uri: buildSpotifyUri('playlist', playlistId) })
   router.push('/now-playing')
 }
 
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await Promise.all([
       spotifyStore.fetchUserPlaylists(),
       spotifyStore.fetchSavedTracks()
     ])
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
@@ -94,7 +92,7 @@ onMounted(async () => {
           Liked Songs
         </h4>
         <h4 class="text-[32px] font-[560] text-white/60 truncate tracking-tight" style="max-width: var(--album-art-size)">
-          {{ formatTrackCount(savedTracksTotal) }}
+          {{ formatCount(savedTracksTotal, 'Songs') }}
         </h4>
       </div>
 
@@ -104,7 +102,7 @@ onMounted(async () => {
         :key="playlist.id"
         :id="playlist.id"
         :name="playlist.name"
-        :subtitle="formatTrackCount(playlist.tracks?.total || 0)"
+        :subtitle="formatCount(playlist.tracks?.total || 0, 'Songs')"
         :image-url="playlist.images?.[0]?.url || ''"
         @click="handlePlaylistClick(playlist.id)"
       />

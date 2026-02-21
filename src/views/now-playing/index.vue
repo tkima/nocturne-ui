@@ -3,11 +3,13 @@
      ============================================================ -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { createButtonHandler } from '@/composables/useButtonAction'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 import ProgressBar from '@/components/player/ProgressBar.vue'
 import {
   HeartIcon,
@@ -20,6 +22,7 @@ import {
 } from '@/components/common/icons'
 import { logger } from '@/utils/logger'
 import { createLogger } from '@/utils/debug'
+import { formatTime } from '@/utils/format'
 import { useToast } from '@/composables/useToast'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 import { useSettings } from '@/composables/useSettings'
@@ -35,6 +38,7 @@ const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const toast = useToast()
+const heartbeat = useHeartbeat()
 const { fastPollMode, stopFastPoll } = useBluetoothTrigger()
 const { settings } = useSettings()
 
@@ -48,7 +52,6 @@ const isLiked = ref(false)
 const isProgressScrubbing = ref(false)
 const playbackProgress = ref(0)
 let progressInterval: ReturnType<typeof setInterval> | null = null
-let playbackPollInterval: ReturnType<typeof setInterval> | null = null
 
 
 // --- Dial/Wheel Seek State ---
@@ -73,18 +76,21 @@ const trackNameOverflow = ref(0) // How many pixels the text overflows
 
 
 /* ============================================================
-   COMPUTED - PLAYBACK INFO
+   COMPUTED - PLAYBACK (from store getters)
    ============================================================ */
 
-// --- Core Playback ---
-const playback = computed(() => spotifyStore.currentPlayback)
-const isPlaying = computed(() => playback.value?.is_playing ?? false)
-const shuffleEnabled = computed(() => playback.value?.shuffle_state ?? false)
-const repeatMode = computed(() => playback.value?.repeat_state ?? 'off')
+const {
+  isPlaying, shuffleState, repeatState, isEpisode,
+  trackName, artistName, albumArt, duration, albumId, showId,
+  currentPlayback, currentEpisodeContext, parsedContext,
+  needsRetry, retryError,
+} = storeToRefs(spotifyStore)
 
-// --- Error State ---
-const needsRetry = computed(() => spotifyStore.needsRetry)
-const retryError = computed(() => spotifyStore.retryError)
+// Local aliases for template compat
+const shuffleEnabled = shuffleState
+const repeatMode = repeatState
+const playback = currentPlayback
+const episodeContext = currentEpisodeContext
 
 // Show error with 5s delay, hide immediately when resolved
 watch(needsRetry, (hasError) => {
@@ -101,78 +107,9 @@ watch(needsRetry, (hasError) => {
   }
 })
 
-// --- Episode Detection ---
-// Check if currently playing is an episode (podcast) or track
-const isEpisode = computed(() => {
-  return playback.value?.currently_playing_type === 'episode' || !!playback.value?.item?.show
-})
-
-// Get episode context from store (set when playing from show view)
-const episodeContext = computed(() => spotifyStore.currentEpisodeContext)
-
-
-/* ============================================================
-   COMPUTED - TRACK INFO DISPLAY
-   ============================================================ */
-
-const trackName = computed(() => playback.value?.item?.name || 'Not Playing')
-
 // Should we animate the track name with marquee?
 const shouldScrollTrackName = computed(() => {
   return settings.value.trackNameScrollingEnabled && trackNameOverflow.value > 0
-})
-
-const artistName = computed(() => {
-  // For episodes, show the show name
-  if (playback.value?.item?.show?.name) {
-    return playback.value.item.show.name
-  }
-  // Fallback to stored episode context
-  if (isEpisode.value && episodeContext.value?.showName) {
-    return episodeContext.value.showName
-  }
-  // For tracks, show artist names
-  const artists = playback.value?.item?.artists
-  if (artists?.length) {
-    return artists.map(a => a.name).join(', ')
-  }
-  return 'Unknown Artist'
-})
-
-const albumArt = computed(() => {
-  const item = playback.value?.item
-
-  // For episodes, use episode images or show images
-  if (item?.images?.length) {
-    return item.images[0]?.url || ''
-  }
-  if (item?.show?.images?.length) {
-    return item.show.images[0]?.url || ''
-  }
-  // Fallback to stored episode context
-  if (isEpisode.value && episodeContext.value) {
-    if (episodeContext.value.episodeImages?.length) {
-      return episodeContext.value.episodeImages[0]?.url || ''
-    }
-    if (episodeContext.value.showImages?.length) {
-      return episodeContext.value.showImages[0]?.url || ''
-    }
-  }
-  // For tracks, use album images
-  const images = item?.album?.images
-  return images?.[0]?.url || images?.[1]?.url || ''
-})
-
-// For tracks: album ID, for episodes: show ID
-const albumId = computed(() => playback.value?.item?.album?.id || null)
-const showId = computed(() => {
-  if (playback.value?.item?.show?.id) {
-    return playback.value.item.show.id
-  }
-  if (isEpisode.value && episodeContext.value?.showId) {
-    return episodeContext.value.showId
-  }
-  return null
 })
 
 
@@ -180,27 +117,10 @@ const showId = computed(() => {
    COMPUTED - PROGRESS & TIME
    ============================================================ */
 
-const duration = computed(() => {
-  const apiDuration = playback.value?.item?.duration_ms || 0
-  if (apiDuration > 0) return apiDuration
-  // Fallback to stored episode context duration
-  if (isEpisode.value && episodeContext.value?.episodeDuration) {
-    return episodeContext.value.episodeDuration
-  }
-  return 0
-})
-
 const progress = computed(() => {
   if (duration.value === 0) return 0
   return (playbackProgress.value / duration.value) * 100
 })
-
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
 
 // Measure if track name overflows its container
 function measureTrackNameOverflow() {
@@ -221,43 +141,17 @@ const remainingTime = computed(() => {
 
 
 /* ============================================================
-   COMPUTED - BUTTON MAPPING
+   BUTTON MAPPING
    ============================================================ */
 
-// Get content info from context URI (for button mapping)
-const mappingContent = computed(() => {
-  const contextUri = playback.value?.context?.uri
-  if (contextUri?.startsWith('spotify:playlist:')) {
-    return { id: contextUri.replace('spotify:playlist:', ''), type: 'playlist' as const }
-  }
-  if (contextUri?.startsWith('spotify:album:')) {
-    return { id: contextUri.replace('spotify:album:', ''), type: 'album' as const }
-  }
-  if (contextUri?.startsWith('spotify:show:')) {
-    return { id: contextUri.replace('spotify:show:', ''), type: 'show' as const }
-  }
-  if (contextUri?.startsWith('spotify:artist:')) {
-    return { id: contextUri.replace('spotify:artist:', ''), type: 'artist' as const }
-  }
-  // For episodes, use the show ID
-  if (isEpisode.value && showId.value) {
-    return { id: showId.value, type: 'show' as const }
-  }
-  // For tracks without context, use album ID
-  if (albumId.value) {
-    return { id: albumId.value, type: 'album' as const }
-  }
-  return { id: null, type: null }
-})
-
 // Update global mappable content when playback changes
-watch(mappingContent, (content) => {
-  if (content.id && content.type) {
+watch(parsedContext, (ctx) => {
+  if (ctx.id && ctx.type) {
     uiStore.setMappableContent({
-      id: content.id,
-      type: content.type,
-      image: albumArt.value,
-      name: trackName.value
+      id: ctx.id,
+      type: ctx.type,
+      image: spotifyStore.albumArt,
+      name: spotifyStore.trackName
     })
   }
 }, { immediate: true })
@@ -323,57 +217,48 @@ function stopProgressTracking() {
 }
 
 // Poll for playback state changes (e.g., when user starts playing on phone)
+function getPlaybackPollInterval(): number {
+  if (fastPollMode.value) return 2000
+  return isPlaying.value ? 15000 : 5000
+}
+
 function startPlaybackPolling() {
-  if (playbackPollInterval) clearInterval(playbackPollInterval)
+  const interval = getPlaybackPollInterval()
+  log.info(`Poll interval: ${interval / 1000}s${fastPollMode.value ? ' (fast mode)' : ''}`)
 
-  const poll = async () => {
-    if (!authStore.isAuthenticated) return
-    await spotifyStore.fetchCurrentPlayback()
-    // Always sync progress from server to prevent drift
-    if (playback.value) {
-      playbackProgress.value = playback.value.progress_ms || 0
+  // Initial poll
+  pollPlayback()
 
-      // If we're in fast poll mode and got valid playback, stop fast polling
-      if (fastPollMode.value && artistName.value && artistName.value !== 'Unknown Artist') {
-        stopFastPoll()
-      }
+  heartbeat.register({
+    name: 'playback-poll',
+    interval,
+    enabled: () => authStore.isAuthenticated,
+    fn: pollPlayback,
+  })
+}
+
+async function pollPlayback() {
+  if (!authStore.isAuthenticated) return
+  await spotifyStore.fetchCurrentPlayback()
+  // Always sync progress from server to prevent drift
+  if (playback.value) {
+    playbackProgress.value = playback.value.progress_ms || 0
+
+    // If we're in fast poll mode and got valid playback, stop fast polling
+    if (fastPollMode.value && artistName.value && artistName.value !== 'Unknown Artist') {
+      stopFastPoll()
     }
   }
-
-  poll() // Initial poll
-
-  // Determine poll interval:
-  // - Fast mode (Bluetooth just connected): 2s
-  // - Normal playing: 15s (prevent drift)
-  // - Normal idle: 5s (detect changes faster)
-  let interval = isPlaying.value ? 15000 : 5000
-  if (fastPollMode.value) {
-    interval = 2000
-    log.info('Poll interval: 2s (fast mode)')
-  } else {
-    log.info(`Poll interval: ${interval / 1000}s`)
-  }
-
-  playbackPollInterval = setInterval(poll, interval)
 }
 
 function stopPlaybackPolling() {
-  if (playbackPollInterval) {
-    clearInterval(playbackPollInterval)
-    playbackPollInterval = null
-  }
+  heartbeat.unregister('playback-poll')
 }
 
-// Adjust polling frequency when play state changes
-watch(isPlaying, () => {
-  if (playbackPollInterval) {
-    startPlaybackPolling()
-  }
-})
-
-// Adjust polling frequency when Bluetooth fast poll mode changes
-watch(fastPollMode, () => {
-  if (playbackPollInterval) {
+// Adjust polling frequency when play state or fast poll mode changes
+watch([isPlaying, fastPollMode], () => {
+  // Only re-register if we have an active poll
+  if (authStore.isAuthenticated) {
     startPlaybackPolling()
   }
 })

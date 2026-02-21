@@ -6,6 +6,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useUiStore } from '@/stores/ui'
 import { useBootStore } from '@/stores/boot'
+import { useNetwork } from '@/composables/useNetwork'
 import GradientBackground from './GradientBackground.vue'
 import { NocturneIcon } from './icons'
 
@@ -23,26 +24,17 @@ const emit = defineEmits<{
 
 const uiStore = useUiStore()
 const bootStore = useBootStore()
+const network = useNetwork()
 
 const bootCounterDone = ref(false)
 let completeCalled = false
 
-// Progress: 2 tasks - boot counter + criticalReady
-const tasksTotal = 2
-const completedTasks = computed(() => {
-  let count = 0
-  if (bootCounterDone.value) count++
-  if (bootStore.criticalReady) count++
-  return count
-})
+// Progress from boot store (0-100)
+const progress = computed(() => bootStore.progress)
 
-const progress = computed(() => {
-  return Math.floor((completedTasks.value / tasksTotal) * 100)
-})
-
-// Watch for completion
-watch(completedTasks, (count) => {
-  if (count === tasksTotal && !completeCalled) {
+// Watch for completion (bootCounterDone + full boot ready including network/auth)
+watch([() => bootCounterDone.value, () => bootStore.bootPhase], ([counterDone, phase]) => {
+  if (counterDone && phase === 'ready' && !completeCalled) {
     completeCalled = true
     // 1s delay before completing to let things stabilize
     setTimeout(() => {
@@ -92,6 +84,17 @@ onMounted(() => {
           />
         </div>
       </div>
+    </div>
+
+    <!-- Connection Status Indicator -->
+    <div class="fixed bottom-6 right-6 z-50 flex items-center space-x-3 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 border border-white/10">
+      <div
+        class="w-3 h-3 rounded-full"
+        :class="network.isConnected.value === true ? 'bg-green-500' : network.isConnected.value === false ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'"
+      />
+      <span class="text-[20px] text-white/80">
+        {{ network.isConnected.value === true ? 'Connected' : network.isConnected.value === false ? 'No Internet' : 'Checking...' }}
+      </span>
     </div>
   </div>
 </template>

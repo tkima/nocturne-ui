@@ -10,6 +10,7 @@ import { ref, computed, readonly } from 'vue'
 import type { BootComponent, BootStatus } from './types'
 import { useAuthStore } from '@/stores/auth'
 import { useSettings } from '@/composables/useSettings'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/debug'
 
@@ -46,10 +47,9 @@ export function createAuthComponent(): BootComponent {
   const status = ref<BootStatus>('idle')
   const error = ref<string | null>(null)
 
-  let pollingId: ReturnType<typeof setInterval> | null = null
-
   const authStore = useAuthStore()
   const { settings } = useSettings()
+  const heartbeat = useHeartbeat()
   const toast = useToast()
 
   // isReady means "auth init is complete" (not "user is authenticated")
@@ -135,23 +135,20 @@ export function createAuthComponent(): BootComponent {
   }
 
   function startPolling(): void {
-    if (pollingId) return
-    log.info('startPolling() - checking token every 5min')
-
-    // Check token expiry every 5 minutes
-    pollingId = setInterval(async () => {
-      if (authStore.isAuthenticated && authStore.isTokenExpired) {
+    log.info('startPolling() - registering auth-token-refresh with heartbeat')
+    heartbeat.register({
+      name: 'auth-token-refresh',
+      interval: 5 * 60 * 1000,
+      enabled: () => authStore.isAuthenticated && authStore.isTokenExpired,
+      fn: async () => {
         log.info('Token expired during poll, refreshing...')
         await reconnect()
-      }
-    }, 5 * 60 * 1000)
+      },
+    })
   }
 
   function stopPolling(): void {
-    if (pollingId) {
-      clearInterval(pollingId)
-      pollingId = null
-    }
+    heartbeat.unregister('auth-token-refresh')
   }
 
   return {

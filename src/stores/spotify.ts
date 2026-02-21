@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useAuthStore } from './auth'
 import type { Track, Album, Artist, Playlist } from '@/types'
 import { logger } from '@/utils/logger'
@@ -48,6 +48,110 @@ export const useSpotifyStore = defineStore('spotify', () => {
   // Retry state - when true, user needs to manually retry
   const needsRetry = ref(false)
   const retryError = ref<string | null>(null)
+
+  // ------------------------------------------------------------
+  // Derived Playback Getters
+  // ------------------------------------------------------------
+  const isPlaying = computed(() => currentPlayback.value?.is_playing ?? false)
+  const shuffleState = computed(() => currentPlayback.value?.shuffle_state ?? false)
+  const repeatState = computed(() => currentPlayback.value?.repeat_state ?? 'off')
+
+  const isEpisode = computed(() => {
+    return currentPlayback.value?.currently_playing_type === 'episode'
+      || !!currentPlayback.value?.item?.show
+  })
+
+  const currentTrackUri = computed(() => currentPlayback.value?.item?.uri ?? null)
+
+  const trackName = computed(() => currentPlayback.value?.item?.name || 'Not Playing')
+
+  const artistName = computed(() => {
+    // For episodes, show the show name
+    if (currentPlayback.value?.item?.show?.name) {
+      return currentPlayback.value.item.show.name
+    }
+    // Fallback to stored episode context
+    if (isEpisode.value && currentEpisodeContext.value?.showName) {
+      return currentEpisodeContext.value.showName
+    }
+    // For tracks, show artist names
+    const artists = currentPlayback.value?.item?.artists
+    if (artists?.length) {
+      return artists.map(a => a.name).join(', ')
+    }
+    return 'Unknown Artist'
+  })
+
+  const albumArt = computed(() => {
+    const item = currentPlayback.value?.item
+
+    // For episodes, use episode images or show images
+    if (item?.images?.length) {
+      return item.images[0]?.url || ''
+    }
+    if (item?.show?.images?.length) {
+      return item.show.images[0]?.url || ''
+    }
+    // Fallback to stored episode context
+    if (isEpisode.value && currentEpisodeContext.value) {
+      if (currentEpisodeContext.value.episodeImages?.length) {
+        return currentEpisodeContext.value.episodeImages[0]?.url || ''
+      }
+      if (currentEpisodeContext.value.showImages?.length) {
+        return currentEpisodeContext.value.showImages[0]?.url || ''
+      }
+    }
+    // For tracks, use album images
+    const images = item?.album?.images
+    return images?.[0]?.url || images?.[1]?.url || ''
+  })
+
+  const duration = computed(() => {
+    const apiDuration = currentPlayback.value?.item?.duration_ms || 0
+    if (apiDuration > 0) return apiDuration
+    // Fallback to stored episode context duration
+    if (isEpisode.value && currentEpisodeContext.value?.episodeDuration) {
+      return currentEpisodeContext.value.episodeDuration
+    }
+    return 0
+  })
+
+  const albumId = computed(() => currentPlayback.value?.item?.album?.id || null)
+
+  const showId = computed(() => {
+    if (currentPlayback.value?.item?.show?.id) {
+      return currentPlayback.value.item.show.id
+    }
+    if (isEpisode.value && currentEpisodeContext.value?.showId) {
+      return currentEpisodeContext.value.showId
+    }
+    return null
+  })
+
+  const parsedContext = computed(() => {
+    const contextUri = currentPlayback.value?.context?.uri
+    if (contextUri?.startsWith('spotify:playlist:')) {
+      return { id: contextUri.replace('spotify:playlist:', ''), type: 'playlist' as const }
+    }
+    if (contextUri?.startsWith('spotify:album:')) {
+      return { id: contextUri.replace('spotify:album:', ''), type: 'album' as const }
+    }
+    if (contextUri?.startsWith('spotify:show:')) {
+      return { id: contextUri.replace('spotify:show:', ''), type: 'show' as const }
+    }
+    if (contextUri?.startsWith('spotify:artist:')) {
+      return { id: contextUri.replace('spotify:artist:', ''), type: 'artist' as const }
+    }
+    // For episodes, use the show ID
+    if (isEpisode.value && showId.value) {
+      return { id: showId.value, type: 'show' as const }
+    }
+    // For tracks without context, use album ID
+    if (albumId.value) {
+      return { id: albumId.value, type: 'album' as const }
+    }
+    return { id: null as string | null, type: null as 'playlist' | 'album' | 'show' | 'artist' | null }
+  })
 
   // ------------------------------------------------------------
   // API Stats - Track requests, retries, rate limits for debugging
@@ -403,14 +507,23 @@ export const useSpotifyStore = defineStore('spotify', () => {
     }, delayMs)
   }
 
+  // Staleness guard - skip if last fetch was < 2s ago
+  let lastPlaybackFetchTime = 0
+  const PLAYBACK_STALE_MS = 2000
+
   async function fetchCurrentPlayback() {
+    const now = Date.now()
+    if (now - lastPlaybackFetchTime < PLAYBACK_STALE_MS) {
+      return currentPlayback.value
+    }
+    lastPlaybackFetchTime = now
     // Include additional_types=episode to get full episode data for podcasts
     const data = await apiRequest<SpotifyPlayback>('/me/player?additional_types=episode')
     if (data) {
       // Log playback state to debug overlay
-      const trackName = data.item?.name || 'None'
-      const isPlaying = data.is_playing ? 'playing' : 'paused'
-      log.info(`Poll: ${trackName.slice(0, 20)}.. (${isPlaying})`)
+      const itemName = data.item?.name || 'None'
+      const playState = data.is_playing ? 'playing' : 'paused'
+      log.info(`Poll: ${itemName.slice(0, 20)}.. (${playState})`)
 
       logger.info('Playback data', {
         type: data.currently_playing_type,
@@ -445,30 +558,30 @@ export const useSpotifyStore = defineStore('spotify', () => {
   async function skipToNext() {
     log.info('Skip Next')
     // Check if currently playing a podcast episode
-    const playback = currentPlayback.value
-    const isEpisode = playback?.currently_playing_type === 'episode'
+    const pb = currentPlayback.value
+    const episodeMode = pb?.currently_playing_type === 'episode'
 
-    if (isEpisode && currentEpisodeContext.value) {
+    if (episodeMode && currentEpisodeContext.value) {
       // For podcasts, fetch episode list and play next episode
-      const showId = currentEpisodeContext.value.showId
+      const ctxShowId = currentEpisodeContext.value.showId
       const currentEpisodeId = currentEpisodeContext.value.episodeId
 
       try {
-        const episodesData = await getShowEpisodes(showId, 50)
+        const episodesData = await getShowEpisodes(ctxShowId, 50)
         if (episodesData?.items) {
           const currentIndex = episodesData.items.findIndex((ep: any) => ep.id === currentEpisodeId)
           if (currentIndex !== -1 && currentIndex < episodesData.items.length - 1) {
             // Next episode is one down in the list (newer episodes first, so next = index + 1)
             const nextEpisode = episodesData.items[currentIndex + 1]
             logger.info('Playing next podcast episode', {
-              showId,
+              showId: ctxShowId,
               currentIndex,
               nextEpisode: nextEpisode.name
             })
 
             // Update episode context before playing
             setEpisodeContext({
-              showId,
+              showId: ctxShowId,
               showName: currentEpisodeContext.value.showName,
               showImages: currentEpisodeContext.value.showImages,
               episodeId: nextEpisode.id,
@@ -495,38 +608,38 @@ export const useSpotifyStore = defineStore('spotify', () => {
   async function skipToPrevious() {
     log.info('Skip Previous')
     // If more than 3 seconds into track/episode, restart current
-    const progress = currentPlayback.value?.progress_ms || 0
-    if (progress > 3000) {
+    const progressMs = currentPlayback.value?.progress_ms || 0
+    if (progressMs > 3000) {
       log.info('Progress > 3s, seeking to start')
       await seek(0)
       return
     }
 
     // Check if currently playing a podcast episode
-    const playback = currentPlayback.value
-    const isEpisode = playback?.currently_playing_type === 'episode'
+    const pb = currentPlayback.value
+    const episodeMode = pb?.currently_playing_type === 'episode'
 
-    if (isEpisode && currentEpisodeContext.value) {
+    if (episodeMode && currentEpisodeContext.value) {
       // For podcasts, fetch episode list and play previous episode
-      const showId = currentEpisodeContext.value.showId
+      const ctxShowId = currentEpisodeContext.value.showId
       const currentEpisodeId = currentEpisodeContext.value.episodeId
 
       try {
-        const episodesData = await getShowEpisodes(showId, 50)
+        const episodesData = await getShowEpisodes(ctxShowId, 50)
         if (episodesData?.items) {
           const currentIndex = episodesData.items.findIndex((ep: any) => ep.id === currentEpisodeId)
           if (currentIndex > 0) {
             // Previous episode is one up in the list (newer episodes first, so previous = index - 1)
             const prevEpisode = episodesData.items[currentIndex - 1]
             logger.info('Playing previous podcast episode', {
-              showId,
+              showId: ctxShowId,
               currentIndex,
               prevEpisode: prevEpisode.name
             })
 
             // Update episode context before playing
             setEpisodeContext({
-              showId,
+              showId: ctxShowId,
               showName: currentEpisodeContext.value.showName,
               showImages: currentEpisodeContext.value.showImages,
               episodeId: prevEpisode.id,
@@ -924,6 +1037,20 @@ export const useSpotifyStore = defineStore('spotify', () => {
     error,
     needsRetry,
     retryError,
+
+    // Derived Playback Getters
+    isPlaying,
+    shuffleState,
+    repeatState,
+    isEpisode,
+    currentTrackUri,
+    trackName,
+    artistName,
+    albumArt,
+    duration,
+    albumId,
+    showId,
+    parsedContext,
 
     // Playback
     fetchCurrentPlayback,

@@ -1,4 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useBootStore } from '@/stores/boot'
+import { useAuthStore } from '@/stores/auth'
+
+function isPublicRoute(path: string): boolean {
+  return path.startsWith('/auth/') || path.startsWith('/test')
+}
 
 const routes = [
   { path: '/', redirect: '/recents' },
@@ -33,4 +39,28 @@ const routes = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+router.beforeEach((to) => {
+  const bootStore = useBootStore()
+  const authStore = useAuthStore()
+
+  // During loading screen, allow all navigation
+  if (!bootStore.loadingComplete) {
+    return true
+  }
+
+  const isAuth = authStore.isAuthenticated
+
+  // Authenticated user visiting login → redirect to recents
+  if (isAuth && to.path === '/auth/login') {
+    return '/recents'
+  }
+
+  // Unauthenticated user visiting protected route → redirect to login
+  if (!isAuth && !isPublicRoute(to.path)) {
+    return '/auth/login'
+  }
+
+  return true
 })

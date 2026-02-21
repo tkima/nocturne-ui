@@ -140,31 +140,6 @@ export const useAuthStore = defineStore('auth', () => {
   // ------------------------------------------------------------
 
   /**
-   * Initialize auth state from settings.
-   * @deprecated Use the boot system (src/boot/AuthComponent.ts) instead.
-   * This is kept for the test page "Reload Token" button.
-   */
-  async function initFromStorage() {
-    log.info('initFromStorage called')
-
-    const { settings, loadSettings } = getSettings()
-    await loadSettings()
-
-    log.info(`settings: access=${!!settings.value.accessToken}, refresh=${!!settings.value.refreshToken}`)
-
-    if (settings.value.accessToken && settings.value.refreshToken) {
-      accessToken.value = settings.value.accessToken
-      refreshToken.value = settings.value.refreshToken
-      if (settings.value.tokenExpiry) {
-        tokenExpiry.value = new Date(settings.value.tokenExpiry)
-      }
-      log.success('Loaded from settings')
-    } else {
-      log.warn('No tokens in settings')
-    }
-  }
-
-  /**
    * Start PKCE auth flow - redirects to Spotify
    */
   async function startPkceAuth(clientId?: string) {
@@ -730,7 +705,6 @@ export const useAuthStore = defineStore('auth', () => {
     isConnected,
 
     // Actions
-    initFromStorage,
     initAuth,
     startPkceAuth,
     pollAuthStatus,

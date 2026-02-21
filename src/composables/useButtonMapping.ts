@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { logger } from '@/utils/logger'
+import { buildSpotifyUri } from '@/utils/spotify'
 import { useSettings, type ButtonMapping } from '@/composables/useSettings'
 
 interface ButtonMappingOptions {
@@ -186,25 +187,13 @@ export async function playPreset(
 
   logger.info('Playing preset', { button: buttonNumber, ...preset })
 
-  switch (preset.type) {
-    case 'playlist':
-      await playFn({ context_uri: `spotify:playlist:${preset.id}` })
-      break
-    case 'album':
-      await playFn({ context_uri: `spotify:album:${preset.id}` })
-      break
-    case 'artist':
-      await playFn({ context_uri: `spotify:artist:${preset.id}` })
-      break
-    case 'show':
-      await playFn({ context_uri: `spotify:show:${preset.id}` })
-      break
-    case 'liked-songs':
-      // For liked songs, track URIs are stored in the mapping
-      if (preset.tracks && preset.tracks.length > 0) {
-        await playFn({ uris: preset.tracks })
-      }
-      break
+  if (preset.type === 'liked-songs') {
+    // For liked songs, track URIs are stored in the mapping
+    if (preset.tracks && preset.tracks.length > 0) {
+      await playFn({ uris: preset.tracks })
+    }
+  } else {
+    await playFn({ context_uri: buildSpotifyUri(preset.type, preset.id) })
   }
 
   return true

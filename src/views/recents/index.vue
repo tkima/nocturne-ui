@@ -2,13 +2,15 @@
      Recents View - Recently played albums and playlists
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed, watch } from 'vue'
+import { onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
+import { useHeartbeat } from '@/composables/useHeartbeat'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
+import { buildSpotifyUri } from '@/utils/spotify'
 import { createLogger } from '@/utils/debug'
 import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 
@@ -20,12 +22,8 @@ const log = createLogger('Recents')
 const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
+const heartbeat = useHeartbeat()
 const { fastPollMode } = useBluetoothTrigger()
-
-// ------------------------------------------------------------
-// Polling State
-// ------------------------------------------------------------
-let playbackPollInterval: ReturnType<typeof setInterval> | null = null
 
 // ------------------------------------------------------------
 // Computed
@@ -33,7 +31,7 @@ let playbackPollInterval: ReturnType<typeof setInterval> | null = null
 const albums = computed(() => spotifyStore.recentlyPlayed)
 const playlists = computed(() => spotifyStore.userPlaylists)
 const isLoading = computed(() => spotifyStore.isLoading)
-const currentTrackUri = computed(() => spotifyStore.currentPlayback?.item?.uri)
+const currentTrackUri = computed(() => spotifyStore.currentTrackUri)
 
 // Combine albums and playlists into one list for display
 const recentItems = computed(() => {
@@ -74,7 +72,7 @@ const recentItems = computed(() => {
 // Methods
 // ------------------------------------------------------------
 function handleItemClick(item: { id: string; type: 'album' | 'playlist' }) {
-  const contextUri = `spotify:${item.type}:${item.id}`
+  const contextUri = buildSpotifyUri(item.type, item.id)
   logger.info(`Play ${item.type}`, { id: item.id })
   spotifyStore.play({ context_uri: contextUri })
   router.push('/now-playing')
@@ -91,35 +89,26 @@ function handleSubtitleClick(item: { id: string; type: 'album' | 'playlist' }) {
 // Polling - Keep playback state in sync
 // ------------------------------------------------------------
 function startPlaybackPolling() {
-  stopPlaybackPolling()
+  const interval = fastPollMode.value ? 2000 : 10000
+  log.info(`Poll interval: ${interval / 1000}s${fastPollMode.value ? ' (fast mode)' : ''}`)
 
-  const poll = async () => {
-    if (!authStore.isAuthenticated) return
-    await spotifyStore.fetchCurrentPlayback()
+  // Initial poll
+  if (authStore.isAuthenticated) {
+    spotifyStore.fetchCurrentPlayback()
   }
 
-  // Run poll immediately
-  poll()
-
-  // Determine poll interval:
-  // - Fast mode (Bluetooth just connected): 2s
-  // - Normal: 10s (recents doesn't need as frequent updates)
-  let interval = 10000
-  if (fastPollMode.value) {
-    interval = 2000
-    log.info('Poll interval: 2s (fast mode)')
-  } else {
-    log.info(`Poll interval: ${interval / 1000}s`)
-  }
-
-  playbackPollInterval = setInterval(poll, interval)
+  heartbeat.register({
+    name: 'playback-poll',
+    interval,
+    enabled: () => authStore.isAuthenticated,
+    fn: async () => {
+      await spotifyStore.fetchCurrentPlayback()
+    },
+  })
 }
 
 function stopPlaybackPolling() {
-  if (playbackPollInterval) {
-    clearInterval(playbackPollInterval)
-    playbackPollInterval = null
-  }
+  heartbeat.unregister('playback-poll')
 }
 
 // ------------------------------------------------------------
@@ -136,19 +125,11 @@ async function fetchRecents() {
   startPlaybackPolling()
 }
 
-onMounted(() => {
-  if (authStore.isAuthenticated) {
-    fetchRecents()
-  }
-})
-
-// Watch for auth to complete (happens in background after page mounts)
 watch(() => authStore.isAuthenticated, (isAuth) => {
-  if (isAuth && recentItems.value.length === 0) {
-    log.info('Auth completed, fetching recents...')
+  if (isAuth) {
     fetchRecents()
   }
-})
+}, { immediate: true })
 
 onUnmounted(() => {
   stopPlaybackPolling()

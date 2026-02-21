@@ -2,7 +2,7 @@
      Show View - Shows podcast episodes in a list
      ============================================================ -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/ui'
 import { useListNavigation } from '@/composables/useListNavigation'
 import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
+import { formatDuration, formatDate, getImageUrl } from '@/utils/format'
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -40,11 +41,9 @@ const { selectedIndex: selectedEpisodeIndex, setSelectedIndex } = useListNavigat
 // Computed
 // ------------------------------------------------------------
 const showId = computed(() => route.params.id as string)
-const currentTrackUri = computed(() => spotifyStore.currentPlayback?.item?.uri)
+const currentTrackUri = computed(() => spotifyStore.currentTrackUri)
 
-const showArt = computed(() => {
-  return show.value?.images?.[0]?.url || show.value?.images?.[1]?.url || ''
-})
+const showArt = computed(() => getImageUrl(show.value?.images))
 
 const showName = computed(() => show.value?.name || 'Unknown Show')
 
@@ -104,26 +103,11 @@ async function handleEpisodePlay(episode: any, index: number) {
   router.push('/now-playing')
 }
 
-function formatDuration(ms: number): string {
-  const minutes = Math.floor(ms / 60000)
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    return `${hours}h ${mins}m`
-  }
-  return `${minutes} min`
-}
-
-function formatDate(dateString: string): string {
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await fetchShowData()
     await spotifyStore.fetchCurrentPlayback()
 
@@ -133,7 +117,7 @@ onMounted(async () => {
       setSelectedIndex(playingIndex)
     }
   }
-})
+}, { immediate: true })
 
 // Watch for episode changes
 watch(currentTrackUri, (newUri) => {

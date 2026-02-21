@@ -2,7 +2,7 @@
      Album View - Shows album tracks in a list
      ============================================================ -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
@@ -10,6 +10,8 @@ import { useUiStore } from '@/stores/ui'
 import { useListNavigation } from '@/composables/useListNavigation'
 import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
+import { getImageUrl } from '@/utils/format'
+import { buildSpotifyUri } from '@/utils/spotify'
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -40,11 +42,9 @@ const { selectedIndex: selectedTrackIndex, setSelectedIndex } = useListNavigatio
 // Computed
 // ------------------------------------------------------------
 const albumId = computed(() => route.params.id as string)
-const currentTrackUri = computed(() => spotifyStore.currentPlayback?.item?.uri)
+const currentTrackUri = computed(() => spotifyStore.currentTrackUri)
 
-const albumArt = computed(() => {
-  return album.value?.images?.[0]?.url || album.value?.images?.[1]?.url || ''
-})
+const albumArt = computed(() => getImageUrl(album.value?.images))
 
 const albumName = computed(() => album.value?.name || 'Unknown Album')
 
@@ -84,7 +84,7 @@ async function handleTrackPlay(track: any, index: number) {
   logger.info('Play track', { trackUri: track.uri, index })
 
   spotifyStore.play({
-    context_uri: `spotify:album:${albumId.value}`,
+    context_uri: buildSpotifyUri('album', albumId.value),
     offset: { position: index }
   })
   router.push('/now-playing')
@@ -93,8 +93,8 @@ async function handleTrackPlay(track: any, index: number) {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await fetchAlbumData()
     await spotifyStore.fetchCurrentPlayback()
 
@@ -103,7 +103,7 @@ onMounted(async () => {
       setSelectedIndex(playingIndex)
     }
   }
-})
+}, { immediate: true })
 
 watch(currentTrackUri, (newUri) => {
   const playingIndex = tracks.value.findIndex(t => t.uri === newUri)
