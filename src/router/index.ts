@@ -21,7 +21,6 @@ const routes = [
   { path: '/recents', component: () => import('@/views/recents/index.vue') },
   { path: '/library', component: () => import('@/views/library/index.vue') },
   { path: '/artists', component: () => import('@/views/artists/index.vue') },
-  { path: '/radio', component: () => import('@/views/radio/index.vue') },
   { path: '/podcasts', component: () => import('@/views/podcasts/index.vue') },
   { path: '/settings', component: () => import('@/views/settings/index.vue') },
   { path: '/now-playing', component: () => import('@/views/now-playing/index.vue') },
@@ -31,6 +30,8 @@ const routes = [
   { path: '/album/:id', component: () => import('@/views/album/index.vue') },
   { path: '/artist/:id', component: () => import('@/views/artist/index.vue') },
   { path: '/show/:id', component: () => import('@/views/show/index.vue') },
+  { path: '/liked-songs', component: () => import('@/views/liked-songs/index.vue') },
+  { path: '/playlist/:id', component: () => import('@/views/playlist/index.vue') },
 
   // Catch-all redirect for removed/invalid routes
   { path: '/:pathMatch(.*)*', redirect: '/recents' },

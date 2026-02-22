@@ -42,8 +42,7 @@ export function createSettingsComponent(): BootComponent {
 
       // Log key settings for debugging
       const hasTokens = !!(settings.value.accessToken && settings.value.refreshToken)
-      const lastBt = settings.value.lastBluetoothDevice?.slice(-8) || 'none'
-      log.success(`Settings loaded: hasTokens=${hasTokens}, lastBT=...${lastBt}`)
+      log.success(`Settings loaded: hasTokens=${hasTokens}`)
 
       status.value = 'ready'
       return true

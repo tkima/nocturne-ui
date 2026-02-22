@@ -6,7 +6,6 @@ import {
   RecentsIcon,
   LibraryIcon,
   ArtistsIcon,
-  RadioIcon,
   PodcastIcon,
   SettingsIcon,
 } from '@/components/common/icons'
@@ -25,7 +24,6 @@ const navItems: NavItem[] = [
   { path: '/recents', label: 'Recents', icon: RecentsIcon },
   { path: '/library', label: 'Library', icon: LibraryIcon },
   { path: '/artists', label: 'Artists', icon: ArtistsIcon },
-  { path: '/radio', label: 'Top Tracks', icon: RadioIcon },
   { path: '/podcasts', label: 'Podcasts', icon: PodcastIcon },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
 ]

@@ -52,23 +52,25 @@ function getItemAttrs(index: number): Record<string, number> {
   <div class="h-screen w-full flex fadeIn-animation">
     <!-- Left: Media Info (Sticky) -->
     <div class="flex-shrink-0 p-12 flex flex-col">
-      <!-- Image -->
-      <img
-        v-if="image"
-        :src="image"
-        alt="Media Art"
-        class="object-cover drop-shadow-[0_8px_5px_rgba(0,0,0,0.25)]"
-        :class="imageClass"
-        style="width: var(--album-art-size); height: var(--album-art-size)"
-      />
-      <div
-        v-else
-        class="bg-white/10 flex items-center justify-center"
-        :class="imageClass"
-        style="width: var(--album-art-size); height: var(--album-art-size)"
-      >
-        <span class="text-white/40 text-xl">No Image</span>
-      </div>
+      <!-- Image (overridable via #image slot) -->
+      <slot name="image">
+        <img
+          v-if="image"
+          :src="image"
+          alt="Media Art"
+          class="object-cover drop-shadow-[0_8px_5px_rgba(0,0,0,0.25)]"
+          :class="imageClass"
+          style="width: var(--album-art-size); height: var(--album-art-size)"
+        />
+        <div
+          v-else
+          class="bg-white/10 flex items-center justify-center"
+          :class="imageClass"
+          style="width: var(--album-art-size); height: var(--album-art-size)"
+        >
+          <span class="text-white/40 text-xl">No Image</span>
+        </div>
+      </slot>
 
       <!-- Info -->
       <div class="mt-6" :class="textAlign" style="max-width: var(--album-art-size)">

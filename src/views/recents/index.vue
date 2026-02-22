@@ -12,7 +12,6 @@ import MediaCard from '@/components/content/MediaCard.vue'
 import { logger } from '@/utils/logger'
 import { buildSpotifyUri } from '@/utils/spotify'
 import { createLogger } from '@/utils/debug'
-import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 
 const log = createLogger('Recents')
 
@@ -23,7 +22,6 @@ const router = useRouter()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
 const heartbeat = useHeartbeat()
-const { fastPollMode } = useBluetoothTrigger()
 
 // ------------------------------------------------------------
 // Computed
@@ -89,8 +87,7 @@ function handleSubtitleClick(item: { id: string; type: 'album' | 'playlist' }) {
 // Polling - Keep playback state in sync
 // ------------------------------------------------------------
 function startPlaybackPolling() {
-  const interval = fastPollMode.value ? 2000 : 10000
-  log.info(`Poll interval: ${interval / 1000}s${fastPollMode.value ? ' (fast mode)' : ''}`)
+  const interval = 5000
 
   // Initial poll
   if (authStore.isAuthenticated) {

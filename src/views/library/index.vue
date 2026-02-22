@@ -8,10 +8,7 @@ import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
-import { logger } from '@/utils/logger'
 import { formatCount } from '@/utils/format'
-import { buildSpotifyUri } from '@/utils/spotify'
-import type { Track } from '@/types'
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -30,21 +27,12 @@ const isLoading = computed(() => spotifyStore.isLoading)
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-async function handleLikedSongsClick() {
-  logger.info('Play liked songs')
-  // Play saved tracks
-  const tracks = spotifyStore.savedTracks
-  if (tracks.length > 0) {
-    const trackUris = tracks.map((t: Track) => t.uri)
-    spotifyStore.play({ uris: trackUris })
-    router.push('/now-playing')
-  }
+function handleLikedSongsClick() {
+  router.push('/liked-songs')
 }
 
 function handlePlaylistClick(playlistId: string) {
-  logger.info('Play playlist', { playlistId })
-  spotifyStore.play({ context_uri: buildSpotifyUri('playlist', playlistId) })
-  router.push('/now-playing')
+  router.push(`/playlist/${playlistId}`)
 }
 
 // ------------------------------------------------------------

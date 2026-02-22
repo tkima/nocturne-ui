@@ -1,5 +1,4 @@
 import { ref } from 'vue'
-import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 import { useHeartbeat } from '@/composables/useHeartbeat'
 import { startBoot } from '@/boot'
 
@@ -76,8 +75,6 @@ export function useNetwork() {
 
     if (connected && !wasConnected) {
       window.dispatchEvent(new Event('networkRestored'))
-      const { onInternetConnected } = useBluetoothTrigger()
-      onInternetConnected()
 
       // Re-run Phase 2 to validate auth
       startBoot('connect')

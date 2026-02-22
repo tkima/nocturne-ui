@@ -8,7 +8,6 @@ import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useConfigStore } from '@/stores/config'
 import { useNetwork } from '@/composables/useNetwork'
-import { useBluetooth } from '@/composables/useBluetooth'
 import { useGlobalKeys } from '@/composables/useGlobalKeys'
 import { useSettings } from '@/composables/useSettings'
 import { startBoot } from '@/boot'
@@ -16,7 +15,6 @@ import { useBootStore } from '@/stores/boot'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import GradientBackground from '@/components/common/GradientBackground.vue'
 import PowerMenuOverlay from '@/components/common/PowerMenuOverlay.vue'
-import PairingScreen from '@/components/auth/PairingScreen.vue'
 import LoadingScreen from '@/components/common/LoadingScreen.vue'
 import ButtonMappingOverlay from '@/components/common/ButtonMappingOverlay.vue'
 import ToastMessage from '@/components/common/ToastMessage.vue'
@@ -35,7 +33,6 @@ const uiStore = useUiStore()
 const authStore = useAuthStore()
 const config = useConfigStore()
 const network = useNetwork()
-const bluetooth = useBluetooth()
 const bootStore = useBootStore()
 
 const {
@@ -64,7 +61,9 @@ const isFullscreenRoute = computed(() =>
   route.path.startsWith('/test') ||
   route.path.startsWith('/album/') ||
   route.path.startsWith('/artist/') ||
-  route.path.startsWith('/show/')
+  route.path.startsWith('/show/') ||
+  route.path === '/liked-songs' ||
+  route.path.startsWith('/playlist/')
 )
 
 // Show global no-connection indicator (except on network setup page)
@@ -97,7 +96,7 @@ onMounted(async () => {
   await new Promise(resolve => setTimeout(resolve, 1000))
 
   // Start the unified boot sequence
-  // This handles: Settings → Bluetooth → Network → Auth
+  // This handles: Settings → Network → Auth
   await startBoot()
   log.info(`Boot complete: criticalReady=${bootStore.criticalReady}, auth=${authStore.isAuthenticated}`)
 })
@@ -186,15 +185,6 @@ async function handleLoadingComplete() {
       @shutdown="handleShutdown"
       @reboot="handleReboot"
       @close="closePowerMenu"
-    />
-
-    <!-- Bluetooth Pairing Screen -->
-    <PairingScreen
-      v-if="bluetooth.pairingRequest.value"
-      :pin="bluetooth.pairingRequest.value.pairingKey"
-      :is-connecting="bluetooth.isConnecting.value"
-      @accept="bluetooth.acceptPairing()"
-      @reject="bluetooth.denyPairing()"
     />
 
     <!-- Loading Screen -->

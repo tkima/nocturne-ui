@@ -4,7 +4,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
@@ -21,25 +21,20 @@ import {
   RepeatIcon
 } from '@/components/common/icons'
 import { logger } from '@/utils/logger'
-import { createLogger } from '@/utils/debug'
 import { formatTime } from '@/utils/format'
 import { useToast } from '@/composables/useToast'
-import { useBluetoothTrigger } from '@/composables/useBluetoothTrigger'
 import { useSettings } from '@/composables/useSettings'
-
-const log = createLogger('Spotify')
-
 
 /* ============================================================
    STORES & ROUTER
    ============================================================ */
 const router = useRouter()
+const route = useRoute()
 const spotifyStore = useSpotifyStore()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const toast = useToast()
 const heartbeat = useHeartbeat()
-const { fastPollMode, stopFastPoll } = useBluetoothTrigger()
 const { settings } = useSettings()
 
 
@@ -216,15 +211,9 @@ function stopProgressTracking() {
   }
 }
 
-// Poll for playback state changes (e.g., when user starts playing on phone)
-function getPlaybackPollInterval(): number {
-  if (fastPollMode.value) return 2000
-  return isPlaying.value ? 15000 : 5000
-}
-
+// Poll for playback state changes
 function startPlaybackPolling() {
-  const interval = getPlaybackPollInterval()
-  log.info(`Poll interval: ${interval / 1000}s${fastPollMode.value ? ' (fast mode)' : ''}`)
+  const interval = 5000
 
   // Initial poll
   pollPlayback()
@@ -243,11 +232,6 @@ async function pollPlayback() {
   // Always sync progress from server to prevent drift
   if (playback.value) {
     playbackProgress.value = playback.value.progress_ms || 0
-
-    // If we're in fast poll mode and got valid playback, stop fast polling
-    if (fastPollMode.value && artistName.value && artistName.value !== 'Unknown Artist') {
-      stopFastPoll()
-    }
   }
 }
 
@@ -255,11 +239,11 @@ function stopPlaybackPolling() {
   heartbeat.unregister('playback-poll')
 }
 
-// Adjust polling frequency when play state or fast poll mode changes
-watch([isPlaying, fastPollMode], () => {
-  // Only re-register if we have an active poll
-  if (authStore.isAuthenticated) {
-    startPlaybackPolling()
+// When navigating back to now-playing (e.g. liked-songs → play → now-playing),
+// fetch fresh playback after 1s so the new track shows up immediately
+watch(() => route.path, (path) => {
+  if (path === '/now-playing' && authStore.isAuthenticated) {
+    setTimeout(pollPlayback, 1000)
   }
 })
 

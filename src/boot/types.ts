@@ -5,7 +5,7 @@
 
 import type { Ref, ComputedRef } from 'vue'
 
-export type BootComponentName = 'settings' | 'auth' | 'network' | 'bluetooth'
+export type BootComponentName = 'settings' | 'auth' | 'network'
 export type BootStatus = 'idle' | 'starting' | 'ready' | 'error' | 'reconnecting'
 
 /**
@@ -43,7 +43,7 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Helper: loop until checkFn returns true
- * Used by Network and Bluetooth to wait for real status
+ * Used by Network to wait for real status
  */
 export async function waitUntilReady(
   checkFn: () => Promise<boolean>,

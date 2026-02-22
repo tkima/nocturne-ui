@@ -440,14 +440,29 @@ export const useSpotifyStore = defineStore('spotify', () => {
     options: RequestInit,
     retryCount: number
   ): Promise<T | null> {
-    logger.warn('Token expired (401), attempting refresh...')
+    // Only retry once - if already retried, don't loop
+    if (retryCount > 0) {
+      log.warn('401 after refresh - token truly invalid')
+      setRetryError('Session expired - please log in again')
+      return null
+    }
 
-    const newToken = await authStore.ensureValidToken()
-    if (newToken && retryCount < 1) {
-      logger.info('Token refreshed, retrying request')
+    // Only refresh if token is actually expired or not authenticated
+    // Avoids unnecessary refresh spam from transient Spotify 401s
+    if (!authStore.isAuthenticated) {
+      log.warn('401 - not authenticated, cannot retry')
+      setRetryError('Session expired - please log in again')
+      return null
+    }
+
+    log.warn('401 - refreshing token...')
+    const refreshed = await authStore.refreshAccessToken()
+    if (refreshed) {
+      log.info('Token refreshed, retrying request')
       return apiRequest<T>(endpoint, options, retryCount + 1)
     }
 
+    log.warn('Token refresh failed')
     setRetryError('Session expired - please log in again')
     return null
   }

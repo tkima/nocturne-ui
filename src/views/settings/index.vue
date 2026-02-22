@@ -97,9 +97,9 @@ const settingsStructure: Record<string, SettingSection> = {
     items: [
       {
         id: 'network-settings',
-        title: 'Wi-Fi & Bluetooth',
+        title: 'Wi-Fi',
         type: 'link',
-        description: 'Configure network connections.',
+        description: 'Configure Wi-Fi connections.',
         route: '/auth/network',
       },
     ],

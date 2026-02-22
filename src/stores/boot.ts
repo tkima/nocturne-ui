@@ -12,7 +12,6 @@ export const useBootStore = defineStore('boot', () => {
   const settingsComponent = shallowRef<BootComponent | null>(null)
   const authComponent = shallowRef<BootComponent | null>(null)
   const networkComponent = shallowRef<BootComponent | null>(null)
-  const bluetoothComponent = shallowRef<BootComponent | null>(null)
 
   const bootPhase = ref<'idle' | 'starting' | 'critical' | 'ready'>('idle')
   const loadingComplete = ref(false)
@@ -35,9 +34,6 @@ export const useBootStore = defineStore('boot', () => {
       case 'network':
         networkComponent.value = component
         break
-      case 'bluetooth':
-        bluetoothComponent.value = component
-        break
     }
   }
 
@@ -50,8 +46,6 @@ export const useBootStore = defineStore('boot', () => {
         return authComponent.value
       case 'network':
         return networkComponent.value
-      case 'bluetooth':
-        return bluetoothComponent.value
     }
   }
 
@@ -65,11 +59,6 @@ export const useBootStore = defineStore('boot', () => {
   // Computed: network ready
   const networkReady = computed(() => {
     return networkComponent.value?.isReady.value ?? false
-  })
-
-  // Computed: bluetooth ready
-  const bluetoothReady = computed(() => {
-    return bluetoothComponent.value?.isReady.value ?? false
   })
 
   // Computed: all ready
@@ -86,7 +75,6 @@ export const useBootStore = defineStore('boot', () => {
     settingsComponent,
     authComponent,
     networkComponent,
-    bluetoothComponent,
     bootPhase,
     loadingComplete,
     progress,
@@ -96,7 +84,6 @@ export const useBootStore = defineStore('boot', () => {
     markLoadingComplete,
     criticalReady,
     networkReady,
-    bluetoothReady,
     allReady,
   }
 })

@@ -10,8 +10,6 @@ import { ref, computed, readonly } from 'vue'
 import type { BootComponent, BootStatus } from './types'
 import { useAuthStore } from '@/stores/auth'
 import { useSettings } from '@/composables/useSettings'
-import { useHeartbeat } from '@/composables/useHeartbeat'
-import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('AuthBoot')
@@ -49,8 +47,6 @@ export function createAuthComponent(): BootComponent {
 
   const authStore = useAuthStore()
   const { settings } = useSettings()
-  const heartbeat = useHeartbeat()
-  const toast = useToast()
 
   // isReady means "auth init is complete" (not "user is authenticated")
   // The app should show for unauthenticated users too (they see login screen)
@@ -135,20 +131,12 @@ export function createAuthComponent(): BootComponent {
   }
 
   function startPolling(): void {
-    log.info('startPolling() - registering auth-token-refresh with heartbeat')
-    heartbeat.register({
-      name: 'auth-token-refresh',
-      interval: 5 * 60 * 1000,
-      enabled: () => authStore.isAuthenticated && authStore.isTokenExpired,
-      fn: async () => {
-        log.info('Token expired during poll, refreshing...')
-        await reconnect()
-      },
-    })
+    // No-op: token refresh is now handled on-demand when API calls get 401
+    log.info('startPolling() - no heartbeat needed, refresh on 401')
   }
 
   function stopPolling(): void {
-    heartbeat.unregister('auth-token-refresh')
+    // No-op
   }
 
   return {
