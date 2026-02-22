@@ -3,8 +3,10 @@ import { computed, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   NowPlayingIcon,
+  QueueIcon,
   RecentsIcon,
   LibraryIcon,
+  RadioIcon,
   ArtistsIcon,
   PodcastIcon,
   SettingsIcon,
@@ -21,9 +23,11 @@ const route = useRoute()
 
 const navItems: NavItem[] = [
   { path: '/now-playing', label: 'Now Playing', icon: NowPlayingIcon },
-  { path: '/recents', label: 'Recents', icon: RecentsIcon },
+  { path: '/queue', label: 'Queue', icon: QueueIcon },
+  { path: '/radio', label: 'Radio', icon: RadioIcon },
   { path: '/library', label: 'Library', icon: LibraryIcon },
   { path: '/artists', label: 'Artists', icon: ArtistsIcon },
+  { path: '/recents', label: 'Recents', icon: RecentsIcon },
   { path: '/podcasts', label: 'Podcasts', icon: PodcastIcon },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
 ]

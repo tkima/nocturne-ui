@@ -146,7 +146,7 @@ watch(parsedContext, (ctx) => {
       id: ctx.id,
       type: ctx.type,
       image: spotifyStore.albumArt,
-      name: spotifyStore.trackName
+      name: spotifyStore.contextName || spotifyStore.trackName
     })
   }
 }, { immediate: true })

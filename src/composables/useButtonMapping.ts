@@ -177,7 +177,7 @@ export function getPreset(buttonNumber: string): ButtonMapping {
 // Helper to play a preset
 export async function playPreset(
   buttonNumber: string,
-  playFn: (options: { context_uri?: string; uris?: string[] }) => Promise<void>
+  playFn: (options: { context_uri?: string; uris?: string[]; offset?: { position: number } }) => Promise<void>
 ) {
   const preset = getPreset(buttonNumber)
   if (!preset.id || !preset.type) {
@@ -188,12 +188,19 @@ export async function playPreset(
   logger.info('Playing preset', { button: buttonNumber, ...preset })
 
   if (preset.type === 'liked-songs') {
-    // For liked songs, track URIs are stored in the mapping
+    // Shuffle URIs for random playback each time
     if (preset.tracks && preset.tracks.length > 0) {
-      await playFn({ uris: preset.tracks })
+      const shuffled = [...preset.tracks].sort(() => Math.random() - 0.5)
+      await playFn({ uris: shuffled })
     }
   } else {
-    await playFn({ context_uri: buildSpotifyUri(preset.type, preset.id) })
+    // Play from a random offset within the context
+    const trackCount = preset.trackCount || 0
+    const randomOffset = trackCount > 1 ? Math.floor(Math.random() * trackCount) : 0
+    await playFn({
+      context_uri: buildSpotifyUri(preset.type, preset.id),
+      offset: { position: randomOffset }
+    })
   }
 
   return true

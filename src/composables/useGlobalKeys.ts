@@ -93,20 +93,51 @@ export function useGlobalKeys() {
 
     const { id, type } = spotifyStore.parsedContext
     const image = spotifyStore.albumArt || null
-    const name = spotifyStore.trackName || null
 
     if (!id || !type) {
       logger.warn('Cannot save button mapping - no mappable content', { id, type })
       return
     }
 
+    // Build context-based mapping (album/playlist/liked-songs, not individual track)
+    let contextName: string | null = spotifyStore.contextName
+    let trackCount: number | null = null
+    let trackUris: string[] | null = null
+
+    if (type === 'liked-songs') {
+      contextName = 'Liked Songs'
+      trackUris = spotifyStore.savedTracks.map(t => t.uri)
+      trackCount = trackUris.length
+    } else if (type === 'album') {
+      // Album name + total tracks from playback data
+      contextName = contextName || 'Unknown Album'
+      trackCount = (spotifyStore.currentPlayback as any)?.item?.album?.total_tracks || null
+      // If no track count, fetch the album
+      if (!trackCount) {
+        const album = await spotifyStore.getAlbum(id)
+        trackCount = (album as any)?.total_tracks || null
+      }
+    } else if (type === 'playlist') {
+      // Fetch playlist to get name + track count
+      const playlist = await spotifyStore.getPlaylist(id)
+      contextName = (playlist as any)?.name || 'Unknown Playlist'
+      trackCount = (playlist as any)?.tracks?.total || null
+    } else if (type === 'artist') {
+      // Artist top tracks
+      contextName = spotifyStore.artistName
+      const data = await spotifyStore.getArtistTopTracks(id)
+      trackCount = (data as any)?.tracks?.length || null
+    }
+
     const { settings, set } = useSettings()
-    const index = parseInt(buttonNumber) - 1 // Convert "1"-"4" to 0-3
+    const index = parseInt(buttonNumber) - 1
     const mapping: ButtonMapping = {
       id,
       type,
       image: image || null,
-      name: name || null,
+      name: contextName || null,
+      trackCount: trackCount || null,
+      tracks: trackUris || null,
     }
 
     const newMappings: (ButtonMapping | null)[] = settings.value.buttonMappings.map(m =>
@@ -115,7 +146,7 @@ export function useGlobalKeys() {
     newMappings[index] = mapping
     await set('buttonMappings', newMappings)
 
-    logger.info('Button mapping saved', { button: buttonNumber, id, type, name })
+    logger.info('Button mapping saved', { button: buttonNumber, id, type, name: contextName, trackCount })
   }
 
   function handleButtonKeyDown(e: KeyboardEvent) {
@@ -172,10 +203,18 @@ export function useGlobalKeys() {
     try {
       if (preset.type === 'liked-songs') {
         if (preset.tracks && preset.tracks.length > 0) {
-          await spotifyStore.play({ uris: [...preset.tracks] })
+          // Shuffle the URIs and play from a random position
+          const shuffled = [...preset.tracks].sort(() => Math.random() - 0.5)
+          await spotifyStore.play({ uris: shuffled })
         }
       } else {
-        await spotifyStore.play({ context_uri: buildSpotifyUri(preset.type, preset.id) })
+        // Play from a random offset within the context
+        const trackCount = preset.trackCount || 0
+        const randomOffset = trackCount > 1 ? Math.floor(Math.random() * trackCount) : 0
+        await spotifyStore.play({
+          context_uri: buildSpotifyUri(preset.type, preset.id),
+          offset: { position: randomOffset }
+        })
       }
 
       // Navigate to now playing after successful playback

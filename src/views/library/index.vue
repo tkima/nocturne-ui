@@ -1,5 +1,5 @@
 <!-- ============================================================
-     Library View - Liked songs + User playlists
+     Library View - Liked songs + User playlists + Radio mixes
      ============================================================ -->
 <script setup lang="ts">
 import { computed, watch } from 'vue'
@@ -20,9 +20,48 @@ const authStore = useAuthStore()
 // ------------------------------------------------------------
 // Computed
 // ------------------------------------------------------------
-const playlists = computed(() => spotifyStore.userPlaylists)
 const savedTracksTotal = computed(() => spotifyStore.savedTracksTotal)
 const isLoading = computed(() => spotifyStore.isLoading)
+
+// Combine playlists + radio mixes into one deduplicated list
+const libraryItems = computed(() => {
+  const seen = new Set<string>()
+  const items: Array<{
+    id: string
+    type: 'playlist' | 'radio' | 'artist-radio'
+    name: string
+    subtitle: string
+    imageUrl: string
+  }> = []
+
+  // User playlists first
+  for (const playlist of spotifyStore.userPlaylists) {
+    if (seen.has(playlist.id)) continue
+    seen.add(playlist.id)
+    items.push({
+      id: playlist.id,
+      type: 'playlist',
+      name: playlist.name,
+      subtitle: formatCount(playlist.tracks?.total || 0, 'Songs'),
+      imageUrl: playlist.images?.[0]?.url || ''
+    })
+  }
+
+  // Radio mixes (only those not already shown as playlists)
+  for (const radio of spotifyStore.radioMixes) {
+    if (seen.has(radio.id)) continue
+    seen.add(radio.id)
+    items.push({
+      id: radio.id,
+      type: radio.type === 'artist' ? 'artist-radio' : 'radio',
+      name: radio.name,
+      subtitle: radio.owner?.display_name || 'Spotify',
+      imageUrl: radio.images?.[0]?.url || ''
+    })
+  }
+
+  return items
+})
 
 // ------------------------------------------------------------
 // Methods
@@ -31,8 +70,18 @@ function handleLikedSongsClick() {
   router.push('/liked-songs')
 }
 
-function handlePlaylistClick(playlistId: string) {
-  router.push(`/playlist/${playlistId}`)
+async function handleItemClick(item: { id: string; type: string }) {
+  if (item.type === 'artist-radio') {
+    await spotifyStore.setShuffle(true)
+    spotifyStore.play({ context_uri: `spotify:artist:${item.id}` })
+    router.push('/now-playing')
+  } else if (item.type === 'radio') {
+    await spotifyStore.setShuffle(true)
+    spotifyStore.play({ context_uri: `spotify:playlist:${item.id}` })
+    router.push('/now-playing')
+  } else {
+    router.push(`/playlist/${item.id}`)
+  }
 }
 
 // ------------------------------------------------------------
@@ -42,7 +91,8 @@ watch(() => authStore.isAuthenticated, async (isAuth) => {
   if (isAuth) {
     await Promise.all([
       spotifyStore.fetchUserPlaylists(),
-      spotifyStore.fetchSavedTracks()
+      spotifyStore.fetchSavedTracks(),
+      spotifyStore.fetchRadioMixes()
     ])
   }
 }, { immediate: true })
@@ -51,13 +101,13 @@ watch(() => authStore.isAuthenticated, async (isAuth) => {
 <template>
   <div class="h-full">
     <!-- Loading state -->
-    <div v-if="isLoading && playlists.length === 0" class="flex items-center justify-center h-full">
+    <div v-if="isLoading && libraryItems.length === 0" class="flex items-center justify-center h-full">
       <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
     </div>
 
     <!-- No content -->
     <div
-      v-else-if="playlists.length === 0 && savedTracksTotal === 0"
+      v-else-if="libraryItems.length === 0 && savedTracksTotal === 0"
       class="flex items-center justify-center h-full"
     >
       <p class="text-white/60 text-2xl">No library content found</p>
@@ -65,9 +115,9 @@ watch(() => authStore.isAuthenticated, async (isAuth) => {
 
     <!-- Library content -->
     <HorizontalScroll v-else>
-      <!-- Liked Songs card (first item) - matches MediaCard structure -->
+      <!-- Liked Songs card (first item) -->
       <div
-        class="pl-2 mr-10 snap-start cursor-pointer"
+        class="pl-2 mr-10 cursor-pointer"
         style="min-width: var(--album-art-size)"
         @click="handleLikedSongsClick"
       >
@@ -84,15 +134,15 @@ watch(() => authStore.isAuthenticated, async (isAuth) => {
         </h4>
       </div>
 
-      <!-- User playlists -->
+      <!-- All library items (playlists + radios, deduplicated) -->
       <MediaCard
-        v-for="playlist in playlists"
-        :key="playlist.id"
-        :id="playlist.id"
-        :name="playlist.name"
-        :subtitle="formatCount(playlist.tracks?.total || 0, 'Songs')"
-        :image-url="playlist.images?.[0]?.url || ''"
-        @click="handlePlaylistClick(playlist.id)"
+        v-for="item in libraryItems"
+        :key="item.id"
+        :id="item.id"
+        :name="item.name"
+        :subtitle="item.subtitle"
+        :image-url="item.imageUrl"
+        @click="handleItemClick(item)"
       />
     </HorizontalScroll>
   </div>

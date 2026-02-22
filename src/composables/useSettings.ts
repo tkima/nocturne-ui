@@ -16,7 +16,8 @@ export interface ButtonMapping {
   type: string | null
   image: string | null
   name: string | null
-  tracks?: string[] | null  // For liked-songs URIs
+  trackCount?: number | null  // Total tracks in context (for random offset)
+  tracks?: string[] | null    // For liked-songs URIs
 }
 
 // Default settings values

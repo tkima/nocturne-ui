@@ -26,13 +26,15 @@ export const useSpotifyStore = defineStore('spotify', () => {
   // State
   // ------------------------------------------------------------
   const currentPlayback = ref<SpotifyPlayback | null>(null)
-  const recentlyPlayed = ref<Album[]>([])
+  const recentlyPlayed = ref<Track[]>([])
   const topArtists = ref<Artist[]>([])
   const userPlaylists = ref<Playlist[]>([])
   const savedTracks = ref<Track[]>([])
   const savedTracksTotal = ref(0)
   const userShows = ref<any[]>([])
   const radioMixes = ref<Playlist[]>([])
+  const queue = ref<Track[]>([])
+  const nextTrack = ref<Track | null>(null)
   // Context for podcasts - stores show and episode info for Now Playing fallback
   const currentEpisodeContext = ref<{
     showId: string
@@ -130,6 +132,10 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
   const parsedContext = computed(() => {
     const contextUri = currentPlayback.value?.context?.uri
+    // Liked Songs (spotify:user:xxx:collection)
+    if (contextUri && /^spotify:user:[^:]+:collection$/.test(contextUri)) {
+      return { id: 'liked-songs', type: 'liked-songs' as const }
+    }
     if (contextUri?.startsWith('spotify:playlist:')) {
       return { id: contextUri.replace('spotify:playlist:', ''), type: 'playlist' as const }
     }
@@ -150,7 +156,17 @@ export const useSpotifyStore = defineStore('spotify', () => {
     if (albumId.value) {
       return { id: albumId.value, type: 'album' as const }
     }
-    return { id: null as string | null, type: null as 'playlist' | 'album' | 'show' | 'artist' | null }
+    return { id: null as string | null, type: null as 'playlist' | 'album' | 'show' | 'artist' | 'liked-songs' | null }
+  })
+
+  // Context name (album name, playlist name, etc.) - used for button presets
+  const contextName = computed(() => {
+    const ctx = parsedContext.value
+    if (ctx.type === 'liked-songs') return 'Liked Songs'
+    if (ctx.type === 'album') return currentPlayback.value?.item?.album?.name || 'Unknown Album'
+    if (ctx.type === 'show') return currentPlayback.value?.item?.show?.name || artistName.value
+    // For playlist/artist, name isn't in playback data — will be fetched on save
+    return null
   })
 
   // ------------------------------------------------------------
@@ -706,6 +722,11 @@ export const useSpotifyStore = defineStore('spotify', () => {
   // Library Actions
   // ------------------------------------------------------------
 
+  // Cursor for pagination of recently played
+  let recentlyPlayedCursor: string | null = null
+  const recentlyPlayedHasMore = ref(true)
+  const recentlyPlayedLoadingMore = ref(false)
+
   async function fetchRecentlyPlayed(limit = 20) {
     isLoading.value = true
     try {
@@ -719,71 +740,42 @@ export const useSpotifyStore = defineStore('spotify', () => {
             href: string
           } | null
         }>
+        cursors?: { before?: string; after?: string }
       }>(`/me/player/recently-played?limit=${limit}`)
 
       if (data?.items) {
-        // Extract unique albums from recently played tracks
-        const albumMap = new Map<string, Album>()
-        // Also track unique contexts (playlists, radios) by URI
-        const contextUris = new Set<string>()
-
-        data.items.forEach(item => {
-          // Add album
-          if (item.track.album && !albumMap.has(item.track.album.id)) {
-            albumMap.set(item.track.album.id, item.track.album)
-          }
-
-          // Track context URIs for playlists (includes radios like "Artist Radio")
-          // Note: Artist radios show as playlist type in the context
-          if (item.context?.type === 'playlist' && item.context.uri) {
-            contextUris.add(item.context.uri)
-          }
-        })
-
-        logger.info('Recently played contexts', {
-          albumCount: albumMap.size,
-          playlistContexts: Array.from(contextUris)
-        })
-
-        recentlyPlayed.value = Array.from(albumMap.values())
-
-        // Fetch playlist details for recently played contexts
-        // Filter out Spotify-generated playlists (radios, mixes) - they start with 37i9dQZF1 and return 404
-        const playlistIds = Array.from(contextUris)
-          .filter(uri => uri.startsWith('spotify:playlist:'))
-          .map(uri => uri.replace('spotify:playlist:', ''))
-          .filter(id => !id.startsWith('37i9dQZF1')) // Skip Spotify auto-generated playlists
-          .slice(0, 10) // Limit to 10 playlists
-
-        if (playlistIds.length > 0) {
-          logger.info('Fetching playlist details', { playlistIds })
-
-          // Fetch each playlist's details individually to handle errors gracefully
-          const playlistResults: Playlist[] = []
-          for (const id of playlistIds) {
-            try {
-              const playlist = await getPlaylist(id)
-              if (playlist) {
-                playlistResults.push(playlist)
-              }
-            } catch (err) {
-              // Skip playlists that fail to load (might be deleted or inaccessible)
-              logger.warn('Failed to fetch playlist', { id, error: err })
-            }
-          }
-
-          // Add to userPlaylists if not already there (merge with existing)
-          const existingIds = new Set(userPlaylists.value.map(p => p.id))
-          const newPlaylists = playlistResults.filter(p => !existingIds.has(p.id))
-
-          // Prepend recently played playlists to the list
-          if (newPlaylists.length > 0) {
-            userPlaylists.value = [...newPlaylists, ...userPlaylists.value]
-          }
-        }
+        recentlyPlayed.value = data.items.map(item => item.track)
+        recentlyPlayedCursor = data.cursors?.before || null
+        recentlyPlayedHasMore.value = !!recentlyPlayedCursor
+        logger.info('Recently played tracks', { count: recentlyPlayed.value.length, hasMore: recentlyPlayedHasMore.value })
       }
     } finally {
       isLoading.value = false
+    }
+  }
+
+  async function fetchMoreRecentlyPlayed(limit = 20) {
+    if (!recentlyPlayedCursor || recentlyPlayedLoadingMore.value || !recentlyPlayedHasMore.value) return
+    recentlyPlayedLoadingMore.value = true
+    try {
+      const data = await apiRequest<{
+        items: Array<{
+          track: Track
+          played_at: string
+        }>
+        cursors?: { before?: string; after?: string }
+      }>(`/me/player/recently-played?limit=${limit}&before=${recentlyPlayedCursor}`)
+
+      if (data?.items && data.items.length > 0) {
+        recentlyPlayed.value = [...recentlyPlayed.value, ...data.items.map(item => item.track)]
+        recentlyPlayedCursor = data.cursors?.before || null
+        recentlyPlayedHasMore.value = !!recentlyPlayedCursor
+        logger.info('Loaded more recently played', { total: recentlyPlayed.value.length, hasMore: recentlyPlayedHasMore.value })
+      } else {
+        recentlyPlayedHasMore.value = false
+      }
+    } finally {
+      recentlyPlayedLoadingMore.value = false
     }
   }
 
@@ -825,78 +817,107 @@ export const useSpotifyStore = defineStore('spotify', () => {
     }
   }
 
+  let radioMixesFetched = false
+
   async function fetchRadioMixes() {
+    // Only fetch once — prevent duplicate calls from multiple views
+    if (radioMixesFetched && radioMixes.value.length > 0) return
+
     isLoading.value = true
     try {
-      const mixes: Playlist[] = []
-      const seenIds = new Set<string>()
+      // Score artists from recents + liked songs to generate radios
+      const artistScores = new Map<string, { name: string; id: string; score: number }>()
 
-      // 1. Get radios from recently played contexts (like "Kanye West Radio")
-      // We need to extract the artist info from the track to build the radio name
-      const recentData = await apiRequest<{
-        items: Array<{
-          track: Track
-          context?: {
-            type: string
-            uri: string
-          } | null
-        }>
-      }>('/me/player/recently-played?limit=25')
-
-      if (recentData?.items) {
-        // Extract radio playlist info from recently played
-        // Artist radios have IDs starting with 37i9dQZF1E
-        recentData.items.forEach(item => {
-          if (item.context?.type === 'playlist' && item.context.uri) {
-            const id = item.context.uri.replace('spotify:playlist:', '')
-            if (id.startsWith('37i9dQZF1E') && !seenIds.has(id)) {
-              seenIds.add(id)
-              // Create a radio entry using the track's artist info
-              const artistName = item.track.artists?.[0]?.name || 'Artist'
-              const artistImage = item.track.album?.images?.[0]?.url || ''
-              mixes.push({
-                id,
-                name: `${artistName} Radio`,
-                images: artistImage ? [{ url: artistImage, width: 300, height: 300 }] : [],
-                tracks: { total: 0 },
-                type: 'playlist',
-                owner: { id: 'spotify', display_name: 'Spotify' }
-              })
-            }
-          }
-        })
-
-        logger.info('Found artist radios from recently played', {
-          count: mixes.length,
-          radios: mixes.map(m => ({ id: m.id, name: m.name }))
-        })
+      function scoreArtist(artist: { id: string; name: string }) {
+        const existing = artistScores.get(artist.id)
+        if (existing) {
+          existing.score += 1
+        } else {
+          artistScores.set(artist.id, { id: artist.id, name: artist.name, score: 1 })
+        }
       }
 
-      // 2. Also get saved Spotify mixes (Daily Mix, Discover Weekly, etc.)
+      // Always fetch fresh data for scoring to ensure we have enough
+      const [recentData, likedData] = await Promise.all([
+        apiRequest<{ items: Array<{ track: Track }> }>('/me/player/recently-played?limit=50'),
+        apiRequest<{ items: Array<{ track: Track }> }>('/me/tracks?limit=50'),
+      ])
+
+      if (recentData?.items) {
+        for (const item of recentData.items) {
+          for (const artist of item.track.artists || []) {
+            scoreArtist(artist)
+          }
+        }
+      }
+
+      if (likedData?.items) {
+        for (const item of likedData.items) {
+          for (const artist of item.track.artists || []) {
+            scoreArtist(artist)
+          }
+        }
+      }
+
+      // Top 20 artists by combined recents + likes score
+      const ranked = Array.from(artistScores.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20)
+
+      logger.info('Radio artist scores', {
+        top: ranked.map(a => ({ name: a.name, score: a.score }))
+      })
+
+      // Fetch real artist images from Spotify (one batch call)
+      const artistIds = ranked.map(a => a.id).join(',')
+      const artistData = await apiRequest<{ artists: Artist[] }>(`/artists?ids=${artistIds}`)
+      const artistImageMap = new Map<string, string>()
+      if (artistData?.artists) {
+        for (const a of artistData.artists) {
+          if (a.images?.[0]?.url) artistImageMap.set(a.id, a.images[0].url)
+        }
+      }
+
+      // Build radio entries — type 'artist' so views know to use artist context URI
+      const mixes: Playlist[] = ranked.map(artist => ({
+        id: artist.id,
+        name: `${artist.name} Radio`,
+        images: [{ url: artistImageMap.get(artist.id) || '', width: 300, height: 300 }],
+        tracks: { total: 0 },
+        type: 'artist',
+        owner: { id: 'spotify', display_name: 'Spotify' }
+      }))
+
+      // Append Spotify-owned mixes (Daily Mix, Discover Weekly, etc.) — min 5 tracks
+      const seenIds = new Set(mixes.map(m => m.id))
       const playlistData = await apiRequest<{ items: Playlist[] }>('/me/playlists?limit=50')
       if (playlistData?.items) {
-        // Log all playlists to see what's available
-        logger.info('User playlists for radio check', {
-          total: playlistData.items.length,
-          spotifyOwned: playlistData.items.filter(p => p.owner?.id === 'spotify').map(p => ({ id: p.id, name: p.name }))
-        })
-
-        playlistData.items.forEach(playlist => {
-          const id = playlist.id
-          const ownerId = playlist.owner?.id
-          // Include ALL playlists owned by 'spotify' (Daily Mix, Discover Weekly, Release Radar, etc.)
-          if (ownerId === 'spotify' && !seenIds.has(id)) {
-            seenIds.add(id)
+        for (const playlist of playlistData.items) {
+          if (playlist.owner?.id === 'spotify' && !seenIds.has(playlist.id) && (playlist.tracks?.total || 0) >= 5) {
+            seenIds.add(playlist.id)
             mixes.push(playlist)
           }
-        })
+        }
       }
 
       radioMixes.value = mixes
+      radioMixesFetched = true
       logger.info('Fetched radio mixes', { count: mixes.length, names: mixes.map(m => m.name) })
     } finally {
       isLoading.value = false
     }
+  }
+
+  async function fetchQueue() {
+    const data = await apiRequest<{ currently_playing: any; queue: Track[] }>('/me/player/queue')
+    if (data) {
+      queue.value = data.queue
+      nextTrack.value = data.queue[0] || null
+    }
+  }
+
+  async function addToQueue(uri: string) {
+    await apiRequest('/me/player/queue?uri=' + encodeURIComponent(uri), { method: 'POST' })
   }
 
   async function getShow(showId: string) {
@@ -1047,6 +1068,8 @@ export const useSpotifyStore = defineStore('spotify', () => {
     savedTracksTotal,
     userShows,
     radioMixes,
+    queue,
+    nextTrack,
     currentEpisodeContext,
     isLoading,
     error,
@@ -1066,6 +1089,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
     albumId,
     showId,
     parsedContext,
+    contextName,
 
     // Playback
     fetchCurrentPlayback,
@@ -1081,10 +1105,17 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
     // Library
     fetchRecentlyPlayed,
+    fetchMoreRecentlyPlayed,
+    recentlyPlayedHasMore,
+    recentlyPlayedLoadingMore,
     fetchTopArtists,
     fetchUserPlaylists,
     fetchUserShows,
     fetchRadioMixes,
+
+    // Queue
+    fetchQueue,
+    addToQueue,
 
     // Tracks
     fetchSavedTracks,
