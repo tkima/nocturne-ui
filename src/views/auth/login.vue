@@ -89,7 +89,7 @@ async function initAuth() {
         const refreshed = await authStore.refreshAccessToken()
         if (refreshed) {
           console.log('Auth: token refresh successful')
-          router.push('/recents')
+          router.push('/radio')
           return
         }
         console.log('Auth: token refresh failed, starting new auth flow')
@@ -171,7 +171,7 @@ onUnmounted(() => {
 watch(() => authStore.isAuthenticated, (isAuth) => {
   if (isAuth) {
     hasQrCode.value = false
-    router.push('/recents')
+    router.push('/radio')
   }
 })
 

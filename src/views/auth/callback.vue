@@ -24,9 +24,9 @@ onMounted(async () => {
 
   if (success) {
     status.value = 'success'
-    logger.info('Auth success, redirecting to /recents')
+    logger.info('Auth success, redirecting to /radio')
     setTimeout(() => {
-      router.push('/recents')
+      router.push('/radio')
     }, 1000)
   } else {
     status.value = 'error'
@@ -67,7 +67,7 @@ onMounted(async () => {
         <p class="text-white/60 text-lg">{{ errorMessage }}</p>
         <button
           class="mt-4 px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white font-[560] transition-colors"
-          @click="router.push('/recents')"
+          @click="router.push('/radio')"
         >
           Go Back
         </button>

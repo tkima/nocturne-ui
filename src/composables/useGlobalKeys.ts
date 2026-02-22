@@ -27,7 +27,7 @@ export function useGlobalKeys() {
 
   // Power menu state
   const powerMenuVisible = ref(false)
-  const previousRoute = ref('/recents')
+  const previousRoute = ref('/radio')
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let longPressTriggered = false
 
@@ -77,7 +77,7 @@ export function useGlobalKeys() {
 
     // Short press: toggle lock view
     if (route.path === '/lock') {
-      router.push(previousRoute.value || '/recents')
+      router.push(previousRoute.value || '/radio')
     } else {
       previousRoute.value = route.path
       router.push('/lock')
@@ -266,12 +266,8 @@ export function useGlobalKeys() {
   // ------------------------------------------------------------
   function handleBackButton(e: KeyboardEvent) {
     if (e.key !== 'Escape') return
-
-    // If on network screen and authenticated, go to recents
-    if (route.path === '/auth/network' && authStore.isAuthenticated) {
-      e.stopPropagation()
-      router.push('/recents')
-    }
+    e.stopPropagation()
+    router.back()
   }
 
   // ------------------------------------------------------------

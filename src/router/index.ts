@@ -7,7 +7,7 @@ function isPublicRoute(path: string): boolean {
 }
 
 const routes = [
-  { path: '/', redirect: '/library' },
+  { path: '/', redirect: '/radio' },
 
   // Auth routes
   { path: '/auth/login', component: () => import('@/views/auth/login.vue') },
@@ -36,7 +36,7 @@ const routes = [
   { path: '/playlist/:id', component: () => import('@/views/playlist/index.vue') },
 
   // Catch-all redirect for removed/invalid routes
-  { path: '/:pathMatch(.*)*', redirect: '/library' },
+  { path: '/:pathMatch(.*)*', redirect: '/radio' },
 ]
 
 export const router = createRouter({
@@ -57,7 +57,7 @@ router.beforeEach((to) => {
 
   // Authenticated user visiting login → redirect to recents
   if (isAuth && to.path === '/auth/login') {
-    return '/library'
+    return '/radio'
   }
 
   // Unauthenticated user visiting protected route → redirect to login

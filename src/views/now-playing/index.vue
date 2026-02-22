@@ -157,7 +157,7 @@ watch(parsedContext, (ctx) => {
    ============================================================ */
 
 function handleClose() {
-  router.push('/recents')
+  router.push('/radio')
 }
 
 function handleArtClick() {
