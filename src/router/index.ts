@@ -1,9 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useBootStore } from '@/stores/boot'
 import { useAuthStore } from '@/stores/auth'
+import { useNetwork } from '@/composables/useNetwork'
 
 function isPublicRoute(path: string): boolean {
   return path.startsWith('/auth/') || path.startsWith('/test')
+}
+
+// Routes accessible when offline and unauthenticated (to reach Settings > Wi-Fi)
+function isOfflineAllowedRoute(path: string): boolean {
+  return path === '/radio' || path === '/settings'
 }
 
 const routes = [
@@ -61,7 +67,12 @@ router.beforeEach((to) => {
   }
 
   // Unauthenticated user visiting protected route → redirect to login
+  // Exception: allow /radio and /settings when offline so user can reach Wi-Fi settings
   if (!isAuth && !isPublicRoute(to.path)) {
+    const network = useNetwork()
+    if (network.isConnected.value === false && isOfflineAllowedRoute(to.path)) {
+      return true
+    }
     return '/auth/login'
   }
 

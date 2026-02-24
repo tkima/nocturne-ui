@@ -65,7 +65,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
   const currentTrackUri = computed(() => currentPlayback.value?.item?.uri ?? null)
 
-  const trackName = computed(() => currentPlayback.value?.item?.name || 'Not Playing')
+  const trackName = computed(() => currentPlayback.value?.item?.name || 'Play Spotify First')
 
   const artistName = computed(() => {
     // For episodes, show the show name
@@ -81,7 +81,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
     if (artists?.length) {
       return artists.map(a => a.name).join(', ')
     }
-    return 'Unknown Artist'
+    return ''
   })
 
   const albumArt = computed(() => {

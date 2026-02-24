@@ -201,19 +201,16 @@ export function useGlobalKeys() {
     logger.info('Playing preset', { button: buttonNumber, ...preset })
 
     try {
+      // Enable shuffle so presets don't always play in the same order
+      await spotifyStore.setShuffle(true)
+
       if (preset.type === 'liked-songs') {
         if (preset.tracks && preset.tracks.length > 0) {
-          // Shuffle the URIs and play from a random position
-          const shuffled = [...preset.tracks].sort(() => Math.random() - 0.5)
-          await spotifyStore.play({ uris: shuffled })
+          await spotifyStore.play({ uris: preset.tracks })
         }
       } else {
-        // Play from a random offset within the context
-        const trackCount = preset.trackCount || 0
-        const randomOffset = trackCount > 1 ? Math.floor(Math.random() * trackCount) : 0
         await spotifyStore.play({
           context_uri: buildSpotifyUri(preset.type, preset.id),
-          offset: { position: randomOffset }
         })
       }
 

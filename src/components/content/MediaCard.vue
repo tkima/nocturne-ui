@@ -23,7 +23,7 @@ const emit = defineEmits<{
 
 <template>
   <div
-    class="pl-2 mr-10"
+    class="pl-2 mr-6"
     style="min-width: var(--album-art-size)"
     :data-id="id"
     :data-playing="isPlaying ? 'true' : 'false'"

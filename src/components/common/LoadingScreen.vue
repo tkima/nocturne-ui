@@ -7,8 +7,6 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useUiStore } from '@/stores/ui'
 import { useBootStore } from '@/stores/boot'
 import { useNetwork } from '@/composables/useNetwork'
-import GradientBackground from './GradientBackground.vue'
-import { NocturneIcon } from './icons'
 
 interface Props {
   show?: boolean
@@ -71,18 +69,13 @@ onMounted(() => {
     class="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden rounded-2xl"
   >
     <div class="absolute inset-0 bg-black" />
-    <GradientBackground :gradient-state="uiStore.gradientStyle" />
 
-    <div class="relative z-10 flex flex-col items-center">
-      <NocturneIcon class="h-14 w-auto mb-8" />
-
-      <div class="relative">
-        <div class="relative w-72 h-2 bg-white/20 rounded-full overflow-hidden">
-          <div
-            class="absolute left-0 top-0 h-full bg-white rounded-full transition-all duration-300 ease-out"
-            :style="{ width: `${progress}%` }"
-          />
-        </div>
+    <div class="relative z-10 w-48">
+      <div class="h-1 bg-white/10 rounded-full overflow-hidden">
+        <div
+          class="h-full bg-white/60 rounded-full transition-all duration-300 ease-out"
+          :style="{ width: `${progress}%` }"
+        />
       </div>
     </div>
 

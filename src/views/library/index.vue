@@ -66,13 +66,8 @@ const libraryItems = computed(() => {
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-async function handleLikedSongsClick() {
-  await spotifyStore.setShuffle(true)
-  const userId = (await spotifyStore.getCurrentUser())?.id
-  if (userId) {
-    spotifyStore.play({ context_uri: `spotify:user:${userId}:collection` })
-    router.push('/now-playing')
-  }
+function handleLikedSongsClick() {
+  router.push('/liked-songs')
 }
 
 async function handleItemClick(item: { id: string; type: string }) {

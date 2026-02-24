@@ -83,6 +83,14 @@ watch(() => authStore.isAuthenticated, (isAuth) => {
   }
 })
 
+// Internet restored while unauthenticated → redirect to login for QR auth
+watch(() => network.isConnected.value, (connected) => {
+  if (connected === true && bootStore.loadingComplete && !authStore.isAuthenticated && !route.path.startsWith('/auth/')) {
+    log.info('Internet restored, not authenticated -> /auth/login')
+    router.replace('/auth/login')
+  }
+})
+
 
 // ------------------------------------------------------------
 // Lifecycle
@@ -138,8 +146,12 @@ async function handleLoadingComplete() {
     if (route.path !== startRoute) {
       router.replace(startRoute)
     }
+  } else if (network.isConnected.value === false) {
+    // No internet - go to main app so user can navigate to Settings > Wi-Fi
+    log.info('Not authenticated, no internet -> /radio (offline mode)')
+    router.replace('/radio')
   } else {
-    // Not authenticated (no tokens, invalid tokens, or no network) - go to login
+    // Has internet but not authenticated - show QR login
     log.info('Not authenticated -> /auth/login')
     router.replace('/auth/login')
   }
@@ -166,7 +178,7 @@ async function handleLoadingComplete() {
       </div>
 
       <!-- Other sections: with sidebar -->
-      <div v-else class="relative z-10 grid grid-cols-[2.2fr_3fr] fadeIn-animation">
+      <div v-else class="relative z-10 grid grid-cols-[1.6fr_3fr] fadeIn-animation">
         <!-- Sidebar navigation -->
         <div class="h-screen overflow-y-auto pb-12 pl-8 relative scroll-container scroll-smooth" style="will-change: transform;">
           <Sidebar />

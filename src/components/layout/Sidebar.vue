@@ -40,7 +40,7 @@ function handleNavigate(path: string) {
 </script>
 
 <template>
-  <div class="space-y-7 pt-12">
+  <div class="space-y-5 pt-10">
     <!-- StatusBar will be conditionally rendered here when implemented -->
 
     <!-- Nav Items -->
@@ -59,14 +59,14 @@ function handleNavigate(path: string) {
 
       <!-- Icon box -->
       <div class="mr-4 flex-shrink-0">
-        <div class="h-[70px] w-[70px] bg-white/25 rounded-[12px] flex items-center justify-center border border-white/10 drop-shadow-[0_20px_5px_rgba(0,0,0,0.25)]">
-          <component :is="item.icon" class="h-10 w-10 text-white" />
+        <div class="h-[56px] w-[56px] bg-white/25 rounded-[10px] flex items-center justify-center border border-white/10 drop-shadow-[0_20px_5px_rgba(0,0,0,0.25)]">
+          <component :is="item.icon" class="h-8 w-8 text-white" />
         </div>
       </div>
 
       <!-- Label -->
       <div>
-        <h4 class="ml-1 text-[32px] font-[580] text-white tracking-tight">
+        <h4 class="ml-1 text-[28px] font-[580] text-white tracking-tight">
           {{ item.label }}
         </h4>
       </div>
