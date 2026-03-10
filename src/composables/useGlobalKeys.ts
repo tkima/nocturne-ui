@@ -264,7 +264,12 @@ export function useGlobalKeys() {
   function handleBackButton(e: KeyboardEvent) {
     if (e.key !== 'Escape') return
     e.stopPropagation()
-    router.back()
+    // If no history (e.g. started on now-playing), go to radio instead
+    if (window.history.state?.back == null) {
+      router.replace('/radio')
+    } else {
+      router.back()
+    }
   }
 
   // ------------------------------------------------------------
