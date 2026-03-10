@@ -97,8 +97,10 @@ watch(needsRetry, (hasError) => {
   }
   if (hasError) {
     errorDelayTimeout = setTimeout(() => {
-      showError.value = true
-    }, 5000)
+      if (needsRetry.value) {
+        showError.value = true
+      }
+    }, 8000)
   } else {
     showError.value = false
   }
