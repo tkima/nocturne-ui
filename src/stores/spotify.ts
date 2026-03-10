@@ -575,6 +575,9 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
   async function play(options?: { context_uri?: string; uris?: string[]; offset?: { position: number } }) {
     log.info(`Play${options ? ` (${options.context_uri || options.uris?.[0] || 'resume'})` : ''}`)
+    if (currentPlayback.value) {
+      currentPlayback.value = { ...currentPlayback.value, is_playing: true }
+    }
     await apiRequest('/me/player/play', {
       method: 'PUT',
       body: options ? JSON.stringify(options) : undefined,
@@ -583,6 +586,9 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
   async function pause() {
     log.info('Pause')
+    if (currentPlayback.value) {
+      currentPlayback.value = { ...currentPlayback.value, is_playing: false }
+    }
     await apiRequest('/me/player/pause', { method: 'PUT' })
   }
 
@@ -868,14 +874,13 @@ export const useSpotifyStore = defineStore('spotify', () => {
         top: ranked.map(a => ({ name: a.name, score: a.score }))
       })
 
-      // Fetch real artist images from Spotify (one batch call)
-      const artistIds = ranked.map(a => a.id).join(',')
-      const artistData = await apiRequest<{ artists: Artist[] }>(`/artists?ids=${artistIds}`)
+      // Fetch real artist images from Spotify (individual calls)
       const artistImageMap = new Map<string, string>()
-      if (artistData?.artists) {
-        for (const a of artistData.artists) {
-          if (a.images?.[0]?.url) artistImageMap.set(a.id, a.images[0].url)
-        }
+      const artistResults = await Promise.all(
+        ranked.map(a => apiRequest<Artist>(`/artists/${a.id}`))
+      )
+      for (const a of artistResults) {
+        if (a?.images?.[0]?.url) artistImageMap.set(a.id, a.images[0].url)
       }
 
       // Build radio entries — type 'artist' so views know to use artist context URI
@@ -893,7 +898,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
       const playlistData = await apiRequest<{ items: Playlist[] }>('/me/playlists?limit=50')
       if (playlistData?.items) {
         for (const playlist of playlistData.items) {
-          if (playlist.owner?.id === 'spotify' && !seenIds.has(playlist.id) && (playlist.tracks?.total || 0) >= 5) {
+          if (playlist.owner?.id === 'spotify' && !seenIds.has(playlist.id) && ((playlist as any).items?.total || playlist.tracks?.total || 0) >= 5) {
             seenIds.add(playlist.id)
             mixes.push(playlist)
           }
@@ -951,16 +956,16 @@ export const useSpotifyStore = defineStore('spotify', () => {
   }
 
   async function checkIfTrackSaved(trackId: string): Promise<boolean> {
-    const data = await apiRequest<boolean[]>(`/me/tracks/contains?ids=${trackId}`)
+    const data = await apiRequest<boolean[]>(`/me/library/contains?ids=${trackId}`)
     return data?.[0] ?? false
   }
 
   async function saveTrack(trackId: string) {
-    await apiRequest(`/me/tracks?ids=${trackId}`, { method: 'PUT' })
+    await apiRequest(`/me/library?ids=${trackId}`, { method: 'PUT' })
   }
 
   async function removeTrack(trackId: string) {
-    await apiRequest(`/me/tracks?ids=${trackId}`, { method: 'DELETE' })
+    await apiRequest(`/me/library?ids=${trackId}`, { method: 'DELETE' })
   }
 
   // ------------------------------------------------------------
@@ -973,7 +978,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
       tracks?: { items: Track[] }
       albums?: { items: Album[] }
       artists?: { items: Artist[] }
-    }>(`/search?q=${encodeURIComponent(query)}&type=${typeString}&limit=20`)
+    }>(`/search?q=${encodeURIComponent(query)}&type=${typeString}&limit=10`)
   }
 
   async function getAlbum(albumId: string) {
@@ -984,10 +989,32 @@ export const useSpotifyStore = defineStore('spotify', () => {
     return await apiRequest<Artist>(`/artists/${artistId}`)
   }
 
-  async function getArtistTopTracks(artistId: string, market = 'US') {
-    return await apiRequest<{ tracks: Track[] }>(
-      `/artists/${artistId}/top-tracks?market=${market}`
-    )
+  async function getArtistTopTracks(artistId: string) {
+    // Artist top-tracks endpoint removed Feb 2026
+    // Build from user's liked songs + recents filtered by artist
+    const [likedData, recentData] = await Promise.all([
+      apiRequest<{ items: Array<{ track: Track }> }>('/me/tracks?limit=50'),
+      apiRequest<{ items: Array<{ track: Track }> }>('/me/player/recently-played?limit=50'),
+    ])
+
+    const seen = new Set<string>()
+    const tracks: Track[] = []
+
+    for (const source of [likedData?.items, recentData?.items]) {
+      for (const item of source || []) {
+        if (item.track.artists?.some(a => a.id === artistId) && !seen.has(item.track.id)) {
+          seen.add(item.track.id)
+          tracks.push(item.track)
+        }
+      }
+    }
+
+    return { tracks }
+  }
+
+  async function getRelatedArtists(artistId: string) {
+    const data = await apiRequest<{ artists: Artist[] }>(`/artists/${artistId}/related-artists`)
+    return data?.artists || []
   }
 
   async function getPlaylist(playlistId: string) {
@@ -1028,9 +1055,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
     return await apiRequest<{
       id: string
       display_name: string
-      email: string
       images: Array<{ url: string }>
-      product: string
     }>('/me')
   }
 
@@ -1128,6 +1153,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
     getAlbum,
     getArtist,
     getArtistTopTracks,
+    getRelatedArtists,
     getPlaylist,
     getShow,
     getShowEpisodes,

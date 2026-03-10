@@ -66,7 +66,7 @@ onMounted(() => {
 <template>
   <div
     v-if="show"
-    class="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden rounded-2xl"
+    class="fixed inset-0 z-[110] flex items-center justify-center overflow-hidden"
   >
     <div class="absolute inset-0 bg-black" />
 

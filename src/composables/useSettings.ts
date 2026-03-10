@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS: Settings = {
   pkceRedirectUri: null,
   // Button mappings (1-4)
   buttonMappings: [null, null, null, null],
+  // Blocklist
+  blockedTracks: [],
 }
 
 export interface Settings {
@@ -77,6 +79,8 @@ export interface Settings {
   pkceRedirectUri: string | null
   // Button mappings (1-4)
   buttonMappings: (ButtonMapping | null)[]
+  // Blocklist
+  blockedTracks: { id: string; name: string; artist: string }[]
 }
 
 // Singleton state

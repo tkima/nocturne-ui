@@ -121,7 +121,7 @@ export function useGlobalKeys() {
       // Fetch playlist to get name + track count
       const playlist = await spotifyStore.getPlaylist(id)
       contextName = (playlist as any)?.name || 'Unknown Playlist'
-      trackCount = (playlist as any)?.tracks?.total || null
+      trackCount = (playlist as any)?.items?.total || (playlist as any)?.tracks?.total || null
     } else if (type === 'artist') {
       // Artist top tracks
       contextName = spotifyStore.artistName

@@ -3,6 +3,14 @@
      ============================================================ -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useSettings } from '@/composables/useSettings'
+import { BlockIcon } from '@/components/common/icons'
+
+const { get: getSetting } = useSettings()
+
+function isTrackBlocked(id: string): boolean {
+  return getSetting('blockedTracks').some(t => t.id === id)
+}
 
 // ------------------------------------------------------------
 // Props
@@ -113,6 +121,7 @@ function getItemAttrs(index: number): Record<string, number> {
         <div class="flex-1 min-w-0">
           <slot name="item" :item="item" :index="index" :is-playing="item.uri === currentItemUri" />
         </div>
+        <BlockIcon v-if="item.id && isTrackBlocked(item.id)" class="w-7 h-7 text-red-400 stroke-red-400 flex-shrink-0 ml-3" />
       </div>
     </div>
   </div>

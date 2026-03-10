@@ -10,7 +10,7 @@ import { useUiStore } from '@/stores/ui'
 import { useListNavigation } from '@/composables/useListNavigation'
 import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
-import { formatCount, getImageUrl } from '@/utils/format'
+import { getImageUrl } from '@/utils/format'
 import type { Artist, Track } from '@/types'
 
 // ------------------------------------------------------------
@@ -48,7 +48,7 @@ const artistImage = computed(() => getImageUrl(artist.value?.images))
 
 const artistName = computed(() => artist.value?.name || 'Unknown Artist')
 
-const followerCount = computed(() => formatCount(artist.value?.followers?.total || 0, 'Followers'))
+const followerCount = computed(() => 'Artist')
 
 // ------------------------------------------------------------
 // Methods

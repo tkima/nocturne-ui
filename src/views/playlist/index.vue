@@ -56,7 +56,7 @@ async function fetchPlaylistData() {
     const data = await spotifyStore.getPlaylist(playlistId.value)
     if (data) {
       playlist.value = data
-      tracks.value = (data as any).tracks?.items?.map((item: any) => item.track).filter(Boolean) || []
+      tracks.value = ((data as any).items?.items || (data as any).tracks?.items || []).map((item: any) => item.item || item.track).filter(Boolean)
       logger.info('Playlist loaded', { playlistId: playlistId.value, trackCount: tracks.value.length })
 
       uiStore.setMappableContent({

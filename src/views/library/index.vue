@@ -42,7 +42,7 @@ const libraryItems = computed(() => {
       id: playlist.id,
       type: 'playlist',
       name: playlist.name,
-      subtitle: formatCount(playlist.tracks?.total || 0, 'Songs'),
+      subtitle: formatCount((playlist as any).items?.total || playlist.tracks?.total || 0, 'Songs'),
       imageUrl: playlist.images?.[0]?.url || ''
     })
   }

@@ -43,7 +43,8 @@ export interface Playlist {
   id: string
   name: string
   images: SpotifyImage[]
-  tracks: { total: number }
+  items?: { total: number }
+  tracks?: { total: number } // legacy compat
   type: 'playlist' | 'artist'
   owner?: {
     id: string

@@ -9,6 +9,7 @@ export { default as SettingsIcon } from './SettingsIcon.vue'
 export { default as QueueIcon } from './QueueIcon.vue'
 
 // Player control icons
+export { default as BlockIcon } from './BlockIcon.vue'
 export { default as HeartIcon } from './HeartIcon.vue'
 export { default as PlayIcon } from './PlayIcon.vue'
 export { default as PauseIcon } from './PauseIcon.vue'

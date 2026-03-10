@@ -220,7 +220,7 @@ async function testSpotifyStore(action: string) {
       case 'user':
         const user = await spotifyStore.getCurrentUser()
         if (user) {
-          log(`User: ${user.display_name} (${user.email})`, 'success')
+          log(`User: ${user.display_name} (${user.id})`, 'success')
         }
         break
       case 'playback':

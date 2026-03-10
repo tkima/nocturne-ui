@@ -7,8 +7,10 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useSettings, type BooleanSettingKey } from '@/composables/useSettings'
+import { useToast } from '@/composables/useToast'
 import { startBoot } from '@/boot'
 import {
+  BlockIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
 } from '@/components/common/icons'
@@ -16,7 +18,8 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const spotifyStore = useSpotifyStore()
-const { toggle, get, loadSettings } = useSettings()
+const { toggle, get, set, loadSettings } = useSettings()
+const toast = useToast()
 
 // Navigation state
 const currentView = ref<'main' | 'section'>('main')
@@ -101,6 +104,16 @@ const settingsStructure: Record<string, SettingSection> = {
         type: 'link',
         description: 'Configure Wi-Fi connections.',
         route: '/auth/network',
+      },
+    ],
+  },
+  blocklist: {
+    title: 'Blocked Songs',
+    icon: 'B',
+    items: [
+      {
+        id: 'blocked-songs-list',
+        type: 'blocklist',
       },
     ],
   },
@@ -202,6 +215,12 @@ function handleAction(action: string) {
 
 function handleLink(route: string) {
   router.push(route)
+}
+
+async function unblockTrack(trackId: string) {
+  const blockedTracks = get('blockedTracks').filter(t => t.id !== trackId)
+  await set('blockedTracks', blockedTracks)
+  toast.success('Song unblocked')
 }
 
 // Fetch user profile
@@ -402,6 +421,28 @@ const activeSectionData = computed(() => {
                 <p class="text-[22px] text-white/60 whitespace-pre-line mt-1">
                   {{ item.description }}
                 </p>
+              </div>
+
+              <!-- Blocklist Item -->
+              <div v-else-if="item.type === 'blocklist'">
+                <div v-if="get('blockedTracks').length === 0" class="p-4 bg-white/10 rounded-xl border border-white/10">
+                  <p class="text-[28px] font-[560] text-white/60 tracking-tight">No blocked songs</p>
+                </div>
+                <div v-else class="space-y-3">
+                  <div
+                    v-for="track in [...get('blockedTracks')].reverse()"
+                    :key="track.id"
+                    class="flex items-center justify-between p-4 bg-white/10 rounded-xl border border-white/10"
+                  >
+                    <div class="flex-1 min-w-0 mr-4">
+                      <p class="text-[28px] font-[580] text-white tracking-tight truncate">{{ track.name }}</p>
+                      <p class="text-[22px] text-white/60 truncate">{{ track.artist }}</p>
+                    </div>
+                    <div class="cursor-pointer flex-shrink-0" @click="unblockTrack(track.id)">
+                      <BlockIcon class="w-10 h-10 text-red-400 stroke-red-400" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <!-- Credits Item -->

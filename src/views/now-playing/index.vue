@@ -12,6 +12,7 @@ import { createButtonHandler } from '@/composables/useButtonAction'
 import { useHeartbeat } from '@/composables/useHeartbeat'
 import ProgressBar from '@/components/player/ProgressBar.vue'
 import {
+  BlockIcon,
   HeartIcon,
   PlayIcon,
   PauseIcon,
@@ -35,7 +36,7 @@ const authStore = useAuthStore()
 const uiStore = useUiStore()
 const toast = useToast()
 const heartbeat = useHeartbeat()
-const { settings } = useSettings()
+const { settings, get: getSetting, set: setSetting } = useSettings()
 
 
 /* ============================================================
@@ -44,6 +45,7 @@ const { settings } = useSettings()
 
 // --- Playback State ---
 const isLiked = ref(false)
+const isBlocked = ref(false)
 const isProgressScrubbing = ref(false)
 const playbackProgress = ref(0)
 let progressInterval: ReturnType<typeof setInterval> | null = null
@@ -180,6 +182,7 @@ function handleKeyDown(e: KeyboardEvent) {
    ============================================================ */
 
 let lastSyncedTrackId: string | null = null // Track ID we already synced near end
+let lastPolledTrackId: string | null = null // Track ID from last poll (for block detection)
 
 function startProgressTracking() {
   if (progressInterval) clearInterval(progressInterval)
@@ -232,6 +235,64 @@ async function pollPlayback() {
   // Always sync progress from server to prevent drift
   if (playback.value) {
     playbackProgress.value = playback.value.progress_ms || 0
+
+    // Check if track changed and auto-skip if blocked
+    const currentTrackId = playback.value.item?.id || null
+    if (currentTrackId && currentTrackId !== lastPolledTrackId) {
+      lastPolledTrackId = currentTrackId
+      checkIfBlocked()
+      await checkIfLiked()
+
+      if (isBlocked.value) {
+        toast.success('Skipped blocked song')
+        await spotifyStore.skipToNext()
+        spotifyStore.fetchPlaybackDebounced()
+        return
+      }
+
+      // Artist radio: queue a related artist track
+      if (parsedContext.value.type === 'artist' && parsedContext.value.id) {
+        queueRelatedArtistTrack(parsedContext.value.id)
+      }
+    }
+  }
+}
+
+/** Queue a random track from a similar artist (fire-and-forget) */
+async function queueRelatedArtistTrack(artistId: string) {
+  try {
+    const artist = await spotifyStore.getArtist(artistId)
+    if (!artist) return
+
+    // Search for similar artists via Spotify search (returns related results)
+    const artistResults = await spotifyStore.search(artist.name, ['artist'])
+    const similarArtists = artistResults?.artists?.items?.filter(a => a.id !== artistId)
+    if (!similarArtists?.length) return
+
+    // Pick a random similar artist, search for their tracks
+    const randomArtist = similarArtists[Math.floor(Math.random() * similarArtists.length)]
+    if (!randomArtist) return
+    const trackResults = await spotifyStore.search(randomArtist.name, ['track'])
+    const tracks = trackResults?.tracks?.items
+    if (!tracks?.length) return
+
+    // Filter out blocked tracks and original artist
+    const blockedIds = new Set(getSetting('blockedTracks').map(t => t.id))
+    const eligible = tracks.filter(t =>
+      !blockedIds.has(t.id) &&
+      t.artists?.some(a => a.id === randomArtist.id)
+    )
+    if (!eligible.length) return
+
+    const randomTrack = eligible[Math.floor(Math.random() * eligible.length)]
+    if (!randomTrack) return
+    await spotifyStore.addToQueue(randomTrack.uri)
+    logger.info('Queued related track', {
+      track: randomTrack.name,
+      artist: randomArtist.name,
+    })
+  } catch (err) {
+    logger.error('Failed to queue related track', { error: err })
   }
 }
 
@@ -333,6 +394,40 @@ async function checkIfLiked() {
     isLiked.value = await spotifyStore.checkIfTrackSaved(trackId)
   }
 }
+
+function checkIfBlocked() {
+  const trackId = playback.value?.item?.id
+  if (trackId) {
+    const blockedTracks = getSetting('blockedTracks')
+    isBlocked.value = blockedTracks.some(t => t.id === trackId)
+  }
+}
+
+const handleToggleBlock = createButtonHandler('Block', async () => {
+  const trackId = playback.value?.item?.id
+  if (!trackId) throw new Error('No track ID')
+
+  const blockedTracks = [...getSetting('blockedTracks')]
+
+  if (isBlocked.value) {
+    const filtered = blockedTracks.filter(t => t.id !== trackId)
+    await setSetting('blockedTracks', filtered)
+    isBlocked.value = false
+    toast.success('Song unblocked')
+  } else {
+    blockedTracks.push({
+      id: trackId,
+      name: trackName.value,
+      artist: artistName.value,
+    })
+    await setSetting('blockedTracks', blockedTracks)
+    toast.success('Song blocked')
+    isBlocked.value = false
+    await spotifyStore.skipToNext()
+    resetProgress()
+    spotifyStore.fetchPlaybackDebounced()
+  }
+}, 500)
 
 
 /* ============================================================
@@ -444,7 +539,9 @@ onMounted(async () => {
     await spotifyStore.fetchCurrentPlayback()
     if (playback.value) {
       playbackProgress.value = playback.value.progress_ms || 0
+      lastPolledTrackId = playback.value.item?.id || null
       await checkIfLiked()
+      checkIfBlocked()
 
       logger.info('Now Playing mounted', {
         type: playback.value.currently_playing_type,
@@ -572,14 +669,24 @@ onUnmounted(() => {
         class="flex justify-between items-center w-full px-12 mt-1 pb-10 transition-all duration-200 ease-in-out"
         :class="isProgressScrubbing ? 'translate-y-24 opacity-0' : 'translate-y-0 opacity-100'"
       >
-        <!-- Like Button -->
-        <div
-          class="flex-shrink-0 cursor-pointer focus:outline-none"
-          @click="handleToggleLike"
-        >
-          <HeartIcon
-            :class="isLiked ? 'w-14 h-14 fill-white' : 'w-14 h-14 fill-white/60'"
-          />
+        <!-- Like & Block Buttons -->
+        <div class="flex items-center gap-6 flex-shrink-0">
+          <div
+            class="cursor-pointer focus:outline-none"
+            @click="handleToggleLike"
+          >
+            <HeartIcon
+              :class="isLiked ? 'w-14 h-14 fill-white' : 'w-14 h-14 fill-white/60'"
+            />
+          </div>
+          <div
+            class="cursor-pointer focus:outline-none pl-[20px]"
+            @click="handleToggleBlock"
+          >
+            <BlockIcon
+              :class="isBlocked ? 'w-10 h-10 text-red-400 stroke-red-400' : 'w-10 h-10 text-white/60'"
+            />
+          </div>
         </div>
 
         <!-- Center Controls: Back, Play/Pause, Forward -->
