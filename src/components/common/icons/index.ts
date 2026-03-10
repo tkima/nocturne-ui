@@ -6,6 +6,7 @@ export { default as ArtistsIcon } from './ArtistsIcon.vue'
 export { default as RadioIcon } from './RadioIcon.vue'
 export { default as PodcastIcon } from './PodcastIcon.vue'
 export { default as SettingsIcon } from './SettingsIcon.vue'
+export { default as QueueIcon } from './QueueIcon.vue'
 
 // Player control icons
 export { default as HeartIcon } from './HeartIcon.vue'

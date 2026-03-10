@@ -16,7 +16,7 @@ function handleWheel(e: WheelEvent) {
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault()
-    router.push('/recents')
+    router.push('/radio')
   }
 }
 

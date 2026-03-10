@@ -8,7 +8,6 @@ import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useConfigStore } from '@/stores/config'
 import { useNetwork } from '@/composables/useNetwork'
-import { useBluetooth } from '@/composables/useBluetooth'
 import { useGlobalKeys } from '@/composables/useGlobalKeys'
 import { useSettings } from '@/composables/useSettings'
 import { startBoot } from '@/boot'
@@ -16,7 +15,6 @@ import { useBootStore } from '@/stores/boot'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import GradientBackground from '@/components/common/GradientBackground.vue'
 import PowerMenuOverlay from '@/components/common/PowerMenuOverlay.vue'
-import PairingScreen from '@/components/auth/PairingScreen.vue'
 import LoadingScreen from '@/components/common/LoadingScreen.vue'
 import ButtonMappingOverlay from '@/components/common/ButtonMappingOverlay.vue'
 import ToastMessage from '@/components/common/ToastMessage.vue'
@@ -35,7 +33,6 @@ const uiStore = useUiStore()
 const authStore = useAuthStore()
 const config = useConfigStore()
 const network = useNetwork()
-const bluetooth = useBluetooth()
 const bootStore = useBootStore()
 
 const {
@@ -64,7 +61,9 @@ const isFullscreenRoute = computed(() =>
   route.path.startsWith('/test') ||
   route.path.startsWith('/album/') ||
   route.path.startsWith('/artist/') ||
-  route.path.startsWith('/show/')
+  route.path.startsWith('/show/') ||
+  route.path === '/liked-songs' ||
+  route.path.startsWith('/playlist/')
 )
 
 // Show global no-connection indicator (except on network setup page)
@@ -75,31 +74,22 @@ const showNoConnectionBubble = computed(() =>
 )
 
 // ------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------
-function isPublicPath(): boolean {
-  const path = window.location.pathname
-  return path.startsWith('/auth/') || path.startsWith('/test')
-}
-
-// ------------------------------------------------------------
 // Watchers
 // ------------------------------------------------------------
+// Auth lost while on a protected route → redirect to login
 watch(() => authStore.isAuthenticated, (isAuth) => {
-  // Only redirect if loading is complete (avoid race during boot)
-  if (!isAuth && !showLoader.value && !isPublicPath()) {
+  if (!isAuth && bootStore.loadingComplete && !route.path.startsWith('/auth/') && !route.path.startsWith('/test')) {
     router.replace('/auth/login')
   }
 })
 
-watch(
-  () => network.isConnected.value,
-  (connected) => {
-    if (connected && route.path === '/auth/network' && !authStore.isAuthenticated) {
-      router.replace('/auth/login')
-    }
+// Internet restored while unauthenticated → redirect to login for QR auth
+watch(() => network.isConnected.value, (connected) => {
+  if (connected === true && bootStore.loadingComplete && !authStore.isAuthenticated && !route.path.startsWith('/auth/')) {
+    log.info('Internet restored, not authenticated -> /auth/login')
+    router.replace('/auth/login')
   }
-)
+})
 
 
 // ------------------------------------------------------------
@@ -114,7 +104,7 @@ onMounted(async () => {
   await new Promise(resolve => setTimeout(resolve, 1000))
 
   // Start the unified boot sequence
-  // This handles: Settings → Bluetooth → Network → Auth
+  // This handles: Settings → Network → Auth
   await startBoot()
   log.info(`Boot complete: criticalReady=${bootStore.criticalReady}, auth=${authStore.isAuthenticated}`)
 })
@@ -142,22 +132,27 @@ function handleReboot() {
 
 async function handleLoadingComplete() {
   showLoader.value = false
+  bootStore.markLoadingComplete()
 
-  // Check if we have saved tokens (auth validation happens in background)
-  const hasTokens = !!settings.value.accessToken && !!settings.value.refreshToken
+  // By now Phase 2 is complete: network checked + auth validated
+  const isAuth = authStore.isAuthenticated
 
-  log.info(`Route decision: hasTokens=${hasTokens}, auth=${authStore.isAuthenticated}, startNP=${settings.value.startWithNowPlaying}`)
+  log.info(`Route decision: auth=${isAuth}, network=${network.isConnected.value}, startNP=${settings.value.startWithNowPlaying}`)
 
-  if (hasTokens) {
-    // We have tokens - go to main app, auth validates in background
-    const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/recents'
-    log.info(`Has tokens -> ${startRoute}`)
+  if (isAuth) {
+    // Auth validated - go to main app
+    const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/radio'
+    log.info(`Authenticated -> ${startRoute}`)
     if (route.path !== startRoute) {
       router.replace(startRoute)
     }
-  } else if (!isPublicPath()) {
-    // No tokens - go to login (network check happens in background)
-    log.info('No tokens -> /auth/login')
+  } else if (network.isConnected.value === false) {
+    // No internet - go to main app so user can navigate to Settings > Wi-Fi
+    log.info('Not authenticated, no internet -> /radio (offline mode)')
+    router.replace('/radio')
+  } else {
+    // Has internet but not authenticated - show QR login
+    log.info('Not authenticated -> /auth/login')
     router.replace('/auth/login')
   }
 }
@@ -183,7 +178,7 @@ async function handleLoadingComplete() {
       </div>
 
       <!-- Other sections: with sidebar -->
-      <div v-else class="relative z-10 grid grid-cols-[2.2fr_3fr] fadeIn-animation">
+      <div v-else class="relative z-10 grid grid-cols-[1.6fr_3fr] fadeIn-animation">
         <!-- Sidebar navigation -->
         <div class="h-screen overflow-y-auto pb-12 pl-8 relative scroll-container scroll-smooth" style="will-change: transform;">
           <Sidebar />
@@ -202,15 +197,6 @@ async function handleLoadingComplete() {
       @shutdown="handleShutdown"
       @reboot="handleReboot"
       @close="closePowerMenu"
-    />
-
-    <!-- Bluetooth Pairing Screen -->
-    <PairingScreen
-      v-if="bluetooth.pairingRequest.value"
-      :pin="bluetooth.pairingRequest.value.pairingKey"
-      :is-connecting="bluetooth.isConnecting.value"
-      @accept="bluetooth.acceptPairing()"
-      @reject="bluetooth.denyPairing()"
     />
 
     <!-- Loading Screen -->

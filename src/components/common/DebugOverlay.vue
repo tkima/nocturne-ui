@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { debugLogs, clearDebugLogs, debugCategory, sessionId } from '@/utils/debug'
-import { useBluetooth } from '@/composables/useBluetooth'
-import { useSettings } from '@/composables/useSettings'
-
-const bluetooth = useBluetooth()
-const { get: getSetting, isLoaded } = useSettings()
 
 // Start minimized by default
 const isExpanded = ref(false)
@@ -29,21 +24,6 @@ const filteredLogs = computed(() => {
   return logs
 })
 
-// BT status summary (for quick view in header)
-const btStatus = computed(() => {
-  const savedDevice = isLoaded.value ? getSetting('lastBluetoothDevice') : null
-  const connectedDevice = bluetooth.devices.value.find(d => d.connected)
-
-  return {
-    savedDevice: savedDevice ? savedDevice.slice(-8) : '(none)',
-    connectedDevice: connectedDevice?.name || connectedDevice?.address?.slice(-8) || '(none)',
-    wsConnected: bluetooth.wsConnected.value,
-    isConnecting: bluetooth.isConnecting.value,
-    isReconnecting: bluetooth.isReconnecting.value,
-    reconnectAttempt: bluetooth.reconnectAttempt.value,
-  }
-})
-
 function setCategory(cat: string) {
   debugCategory.value = cat === 'All' ? null : cat
 }
@@ -62,16 +42,6 @@ function setCategory(cat: string) {
       <div class="flex items-center gap-4">
         <span class="font-bold text-blue-400 text-[16px]">DEBUG</span>
         <span class="text-purple-400 font-bold">{{ sessionId }}</span>
-        <span :class="btStatus.wsConnected ? 'text-green-400' : 'text-red-400'">
-          WS:{{ btStatus.wsConnected ? 'OK' : 'X' }}
-        </span>
-        <span :class="btStatus.connectedDevice !== '(none)' ? 'text-green-400' : 'text-yellow-400'">
-          BT:{{ btStatus.connectedDevice }}
-        </span>
-        <span v-if="btStatus.isConnecting" class="text-yellow-400 animate-pulse">Connecting...</span>
-        <span v-if="btStatus.isReconnecting" class="text-orange-400 animate-pulse">
-          Reconnect #{{ btStatus.reconnectAttempt }}
-        </span>
       </div>
       <div class="flex items-center gap-3">
         <span class="text-white/50">{{ filteredLogs.length }} logs</span>

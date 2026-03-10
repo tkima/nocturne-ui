@@ -7,6 +7,7 @@ import { getPreset } from '@/composables/useButtonMapping'
 import { useSettings, type ButtonMapping } from '@/composables/useSettings'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
+import { buildSpotifyUri } from '@/utils/spotify'
 
 const LONG_PRESS_DURATION = 2000 // 2 seconds for long press to map
 
@@ -26,7 +27,7 @@ export function useGlobalKeys() {
 
   // Power menu state
   const powerMenuVisible = ref(false)
-  const previousRoute = ref('/recents')
+  const previousRoute = ref('/radio')
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let longPressTriggered = false
 
@@ -76,7 +77,7 @@ export function useGlobalKeys() {
 
     // Short press: toggle lock view
     if (route.path === '/lock') {
-      router.push(previousRoute.value || '/recents')
+      router.push(previousRoute.value || '/radio')
     } else {
       previousRoute.value = route.path
       router.push('/lock')
@@ -89,58 +90,54 @@ export function useGlobalKeys() {
   async function saveButtonMapping(buttonNumber: string) {
     // Fetch fresh playback data before saving
     await spotifyStore.fetchCurrentPlayback()
-    const playback = spotifyStore.currentPlayback
 
-    // Extract content from current playback
-    let id: string | null = null
-    let type: 'playlist' | 'album' | 'artist' | 'show' | 'liked-songs' | null = null
-    let image: string | null = null
-    let name: string | null = null
-
-    const contextUri = playback?.context?.uri
-    if (contextUri?.startsWith('spotify:playlist:')) {
-      id = contextUri.replace('spotify:playlist:', '')
-      type = 'playlist'
-    } else if (contextUri?.startsWith('spotify:album:')) {
-      id = contextUri.replace('spotify:album:', '')
-      type = 'album'
-    } else if (contextUri?.startsWith('spotify:show:')) {
-      id = contextUri.replace('spotify:show:', '')
-      type = 'show'
-    } else if (contextUri?.startsWith('spotify:artist:')) {
-      id = contextUri.replace('spotify:artist:', '')
-      type = 'artist'
-    } else if (playback?.item?.show?.id) {
-      // Episode without context - use show
-      id = playback.item.show.id
-      type = 'show'
-    } else if (playback?.item?.album?.id) {
-      // Track without context - use album
-      id = playback.item.album.id
-      type = 'album'
-    }
-
-    // Get image and name from playback
-    if (playback?.item) {
-      name = playback.item.name || null
-      image = playback.item.album?.images?.[0]?.url
-        || playback.item.images?.[0]?.url
-        || playback.item.show?.images?.[0]?.url
-        || null
-    }
+    const { id, type } = spotifyStore.parsedContext
+    const image = spotifyStore.albumArt || null
 
     if (!id || !type) {
       logger.warn('Cannot save button mapping - no mappable content', { id, type })
       return
     }
 
+    // Build context-based mapping (album/playlist/liked-songs, not individual track)
+    let contextName: string | null = spotifyStore.contextName
+    let trackCount: number | null = null
+    let trackUris: string[] | null = null
+
+    if (type === 'liked-songs') {
+      contextName = 'Liked Songs'
+      trackUris = spotifyStore.savedTracks.map(t => t.uri)
+      trackCount = trackUris.length
+    } else if (type === 'album') {
+      // Album name + total tracks from playback data
+      contextName = contextName || 'Unknown Album'
+      trackCount = (spotifyStore.currentPlayback as any)?.item?.album?.total_tracks || null
+      // If no track count, fetch the album
+      if (!trackCount) {
+        const album = await spotifyStore.getAlbum(id)
+        trackCount = (album as any)?.total_tracks || null
+      }
+    } else if (type === 'playlist') {
+      // Fetch playlist to get name + track count
+      const playlist = await spotifyStore.getPlaylist(id)
+      contextName = (playlist as any)?.name || 'Unknown Playlist'
+      trackCount = (playlist as any)?.tracks?.total || null
+    } else if (type === 'artist') {
+      // Artist top tracks
+      contextName = spotifyStore.artistName
+      const data = await spotifyStore.getArtistTopTracks(id)
+      trackCount = (data as any)?.tracks?.length || null
+    }
+
     const { settings, set } = useSettings()
-    const index = parseInt(buttonNumber) - 1 // Convert "1"-"4" to 0-3
+    const index = parseInt(buttonNumber) - 1
     const mapping: ButtonMapping = {
       id,
       type,
       image: image || null,
-      name: name || null,
+      name: contextName || null,
+      trackCount: trackCount || null,
+      tracks: trackUris || null,
     }
 
     const newMappings: (ButtonMapping | null)[] = settings.value.buttonMappings.map(m =>
@@ -149,7 +146,7 @@ export function useGlobalKeys() {
     newMappings[index] = mapping
     await set('buttonMappings', newMappings)
 
-    logger.info('Button mapping saved', { button: buttonNumber, id, type, name })
+    logger.info('Button mapping saved', { button: buttonNumber, id, type, name: contextName, trackCount })
   }
 
   function handleButtonKeyDown(e: KeyboardEvent) {
@@ -204,33 +201,17 @@ export function useGlobalKeys() {
     logger.info('Playing preset', { button: buttonNumber, ...preset })
 
     try {
-      let contextUri: string | undefined
-      let uris: string[] | undefined
+      // Enable shuffle so presets don't always play in the same order
+      await spotifyStore.setShuffle(true)
 
-      switch (preset.type) {
-        case 'playlist':
-          contextUri = `spotify:playlist:${preset.id}`
-          break
-        case 'album':
-          contextUri = `spotify:album:${preset.id}`
-          break
-        case 'artist':
-          contextUri = `spotify:artist:${preset.id}`
-          break
-        case 'show':
-          contextUri = `spotify:show:${preset.id}`
-          break
-        case 'liked-songs':
-          if (preset.tracks && preset.tracks.length > 0) {
-            uris = [...preset.tracks]
-          }
-          break
-      }
-
-      if (contextUri) {
-        await spotifyStore.play({ context_uri: contextUri })
-      } else if (uris && uris.length > 0) {
-        await spotifyStore.play({ uris })
+      if (preset.type === 'liked-songs') {
+        if (preset.tracks && preset.tracks.length > 0) {
+          await spotifyStore.play({ uris: preset.tracks })
+        }
+      } else {
+        await spotifyStore.play({
+          context_uri: buildSpotifyUri(preset.type, preset.id),
+        })
       }
 
       // Navigate to now playing after successful playback
@@ -282,12 +263,8 @@ export function useGlobalKeys() {
   // ------------------------------------------------------------
   function handleBackButton(e: KeyboardEvent) {
     if (e.key !== 'Escape') return
-
-    // If on network screen and authenticated, go to recents
-    if (route.path === '/auth/network' && authStore.isAuthenticated) {
-      e.stopPropagation()
-      router.push('/recents')
-    }
+    e.stopPropagation()
+    router.back()
   }
 
   // ------------------------------------------------------------

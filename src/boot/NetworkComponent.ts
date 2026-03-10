@@ -14,16 +14,12 @@ import { createLogger } from '@/utils/debug'
 
 const log = createLogger('NetworkBoot')
 
-const POLL_INTERVAL = 3000 // 3s when disconnected
-
 export function createNetworkComponent(): BootComponent {
   const status = ref<BootStatus>('idle')
   const error = ref<string | null>(null)
 
   // Use the composable's state so UI components stay in sync
   const network = useNetwork()
-
-  let pollingId: ReturnType<typeof setInterval> | null = null
 
   const isReady = computed(() => network.isConnected.value === true)
 
@@ -124,35 +120,6 @@ export function createNetworkComponent(): BootComponent {
     return connected
   }
 
-  /**
-   * Start polling when disconnected (delegates to composable)
-   */
-  function startPolling(): void {
-    if (pollingId) return
-
-    log.info(`Starting poll (every ${POLL_INTERVAL}ms)`)
-    pollingId = setInterval(async () => {
-      await network.refresh()
-      if (network.isConnected.value === true) {
-        status.value = 'ready'
-        error.value = null
-        stopPolling()
-        log.success('Connection restored')
-      }
-    }, POLL_INTERVAL)
-  }
-
-  /**
-   * Stop polling
-   */
-  function stopPolling(): void {
-    if (pollingId) {
-      clearInterval(pollingId)
-      pollingId = null
-      log.info('Polling stopped')
-    }
-  }
-
   return {
     name: 'network',
     status: readonly(status),
@@ -161,7 +128,5 @@ export function createNetworkComponent(): BootComponent {
     startup,
     init,
     reconnect,
-    startPolling,
-    stopPolling,
   }
 }

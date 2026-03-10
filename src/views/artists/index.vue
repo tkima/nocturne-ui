@@ -2,12 +2,13 @@
      Artists View - Top artists
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
+import { formatCount } from '@/utils/format'
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -25,16 +26,6 @@ const isLoading = computed(() => spotifyStore.isLoading)
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-function formatFollowerCount(count: number): string {
-  if (count >= 1000000) {
-    const millions = count / 1000000
-    return millions % 1 === 0
-      ? `${Math.floor(millions)}M Followers`
-      : `${millions.toFixed(1)}M Followers`
-  }
-  return count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' Followers'
-}
-
 function handleArtistClick(artistId: string) {
   router.push(`/artist/${artistId}`)
 }
@@ -42,11 +33,11 @@ function handleArtistClick(artistId: string) {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await spotifyStore.fetchTopArtists()
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
@@ -71,7 +62,7 @@ onMounted(async () => {
         :key="artist.id"
         :id="artist.id"
         :name="artist.name"
-        :subtitle="formatFollowerCount(artist.followers?.total || 0)"
+        :subtitle="formatCount(artist.followers?.total || 0, 'Followers')"
         :image-url="artist.images?.[1]?.url || artist.images?.[0]?.url || ''"
         :is-rounded="true"
         @click="handleArtistClick(artist.id)"

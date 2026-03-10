@@ -119,6 +119,9 @@ export const useAuthStore = defineStore('auth', () => {
   let pollingIntervalId: ReturnType<typeof setInterval> | null = null
   let currentDeviceCode: string | null = null
 
+  // Refresh lock — prevents concurrent refresh attempts
+  let refreshPromise: Promise<boolean> | null = null
+
   // ------------------------------------------------------------
   // Getters
   // ------------------------------------------------------------
@@ -138,31 +141,6 @@ export const useAuthStore = defineStore('auth', () => {
   // ------------------------------------------------------------
   // Actions
   // ------------------------------------------------------------
-
-  /**
-   * Initialize auth state from settings.
-   * @deprecated Use the boot system (src/boot/AuthComponent.ts) instead.
-   * This is kept for the test page "Reload Token" button.
-   */
-  async function initFromStorage() {
-    log.info('initFromStorage called')
-
-    const { settings, loadSettings } = getSettings()
-    await loadSettings()
-
-    log.info(`settings: access=${!!settings.value.accessToken}, refresh=${!!settings.value.refreshToken}`)
-
-    if (settings.value.accessToken && settings.value.refreshToken) {
-      accessToken.value = settings.value.accessToken
-      refreshToken.value = settings.value.refreshToken
-      if (settings.value.tokenExpiry) {
-        tokenExpiry.value = new Date(settings.value.tokenExpiry)
-      }
-      log.success('Loaded from settings')
-    } else {
-      log.warn('No tokens in settings')
-    }
-  }
 
   /**
    * Start PKCE auth flow - redirects to Spotify
@@ -600,10 +578,31 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Refresh access token
+   * Refresh access token (with lock — concurrent callers share one request)
    */
   async function refreshAccessToken(): Promise<boolean> {
+    // If a refresh is already in flight, piggyback on it
+    if (refreshPromise) {
+      log.info('Refresh already in progress, awaiting existing request')
+      return refreshPromise
+    }
+
+    refreshPromise = doRefresh()
+    try {
+      return await refreshPromise
+    } finally {
+      refreshPromise = null
+    }
+  }
+
+  async function doRefresh(): Promise<boolean> {
     if (!refreshToken.value) {
+      return false
+    }
+
+    // Skip if network is down — don't waste time on a fetch that will timeout
+    if (networkConnected.value !== true) {
+      log.warn('Refresh skipped - no network')
       return false
     }
 
@@ -625,8 +624,9 @@ export const useAuthStore = defineStore('auth', () => {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
         if (errorData?.error === 'invalid_grant') {
-          logout()
-          throw new Error('invalid_grant')
+          log.warn('Refresh token revoked (invalid_grant) - logging out')
+          await logout()
+          return false
         }
         throw new Error(`Token refresh failed: ${response.status}`)
       }
@@ -698,6 +698,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * Check if token needs refresh and refresh if needed
+   * Safe to call concurrently — refresh lock prevents duplicate requests
    */
   async function ensureValidToken(): Promise<string | null> {
     if (!isAuthenticated.value) {
@@ -705,6 +706,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     if (isTokenExpired.value) {
+      log.info('Token expired, refreshing...')
       const success = await refreshAccessToken()
       if (!success) {
         return null
@@ -730,7 +732,6 @@ export const useAuthStore = defineStore('auth', () => {
     isConnected,
 
     // Actions
-    initFromStorage,
     initAuth,
     startPkceAuth,
     pollAuthStatus,

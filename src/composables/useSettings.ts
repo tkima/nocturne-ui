@@ -16,7 +16,8 @@ export interface ButtonMapping {
   type: string | null
   image: string | null
   name: string | null
-  tracks?: string[] | null  // For liked-songs URIs
+  trackCount?: number | null  // Total tracks in context (for random offset)
+  tracks?: string[] | null    // For liked-songs URIs
 }
 
 // Default settings values
@@ -47,8 +48,6 @@ const DEFAULT_SETTINGS: Settings = {
   pkceRedirectUri: null,
   // Button mappings (1-4)
   buttonMappings: [null, null, null, null],
-  // Bluetooth
-  lastBluetoothDevice: null,
 }
 
 export interface Settings {
@@ -78,8 +77,6 @@ export interface Settings {
   pkceRedirectUri: string | null
   // Button mappings (1-4)
   buttonMappings: (ButtonMapping | null)[]
-  // Bluetooth
-  lastBluetoothDevice: string | null
 }
 
 // Singleton state

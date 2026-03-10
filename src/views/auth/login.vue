@@ -68,11 +68,6 @@ const displayError = computed(() => {
 // Auth initialization
 // ------------------------------------------------------------
 async function initAuth() {
-  if (authStore.isAuthenticated) {
-    router.push('/recents')
-    return
-  }
-
   // Wait for network to be confirmed connected (not null/unknown, not false)
   if (network.isConnected.value !== true) {
     console.log('Auth: waiting for network connection...')
@@ -94,7 +89,7 @@ async function initAuth() {
         const refreshed = await authStore.refreshAccessToken()
         if (refreshed) {
           console.log('Auth: token refresh successful')
-          router.push('/recents')
+          router.push('/radio')
           return
         }
         console.log('Auth: token refresh failed, starting new auth flow')
@@ -155,17 +150,13 @@ onMounted(async () => {
   // Set auth gradient
   uiStore.setGradientColors(['#1a4a3a', '#2d1f3d'])
 
-  // Check if already authenticated (tokens loaded by boot system)
-  if (authStore.isAuthenticated) {
-    router.push('/recents')
+  // If network is already connected, start auth flow
+  // Otherwise, the network watcher will trigger it when connected
+  // (Guard prevents reaching here if already authenticated)
+  if (network.isConnected.value === true) {
+    initAuth()
   } else {
-    // If network is already connected, start auth flow
-    // Otherwise, the network watcher will trigger it when connected
-    if (network.isConnected.value === true) {
-      initAuth()
-    } else {
-      console.log('Auth: waiting for network to connect...')
-    }
+    console.log('Auth: waiting for network to connect...')
   }
 })
 
@@ -180,7 +171,7 @@ onUnmounted(() => {
 watch(() => authStore.isAuthenticated, (isAuth) => {
   if (isAuth) {
     hasQrCode.value = false
-    router.push('/recents')
+    router.push('/radio')
   }
 })
 

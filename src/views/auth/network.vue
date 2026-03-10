@@ -1,5 +1,5 @@
 <!-- ============================================================
-     Network Screen - Wi-Fi and Bluetooth connection settings
+     Network Screen - Wi-Fi connection settings
      ============================================================ -->
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
@@ -7,13 +7,11 @@ import { useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useWiFiNetworks } from '@/composables/useWiFiNetworks'
-import { useBluetooth } from '@/composables/useBluetooth'
 import { useNetwork } from '@/composables/useNetwork'
 import GradientBackground from '@/components/common/GradientBackground.vue'
 import {
   NocturneIcon,
   WifiIcon,
-  BluetoothIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   RefreshIcon
@@ -29,7 +27,6 @@ const authStore = useAuthStore()
 
 // Composables
 const wifi = useWiFiNetworks()
-const bluetooth = useBluetooth()
 const network = useNetwork()
 
 // Watch for internet connection - auto navigate to login when connected
@@ -48,7 +45,7 @@ watch(
 // ------------------------------------------------------------
 // State
 // ------------------------------------------------------------
-type Screen = 'main' | 'network' | 'wifi' | 'bluetooth'
+type Screen = 'main' | 'network' | 'wifi'
 const currentScreen = ref<Screen>('main')
 
 const isAnimating = ref(false)
@@ -62,11 +59,6 @@ const keyboardRef = ref<HTMLDivElement | null>(null)
 let keyboard: Keyboard | null = null
 const layoutName = ref('default')
 const capsLock = ref(false)
-
-// Forget device modal (Bluetooth)
-const showForgetModal = ref(false)
-const deviceToForget = ref<{ address: string; name: string } | null>(null)
-let longPressTimer: ReturnType<typeof setTimeout> | null = null
 
 // Forget WiFi network modal
 const showForgetWifiModal = ref(false)
@@ -90,14 +82,9 @@ function navigateTo(screen: Screen) {
   if (screen === 'network') {
     mainClasses.value = '-translate-x-full opacity-0'
     networkClasses.value = 'translate-x-0 opacity-100'
-  } else if (screen === 'wifi' || screen === 'bluetooth') {
+  } else if (screen === 'wifi') {
     networkClasses.value = '-translate-x-full opacity-0'
     subpageClasses.value = 'translate-x-0 opacity-100'
-
-    // When entering Bluetooth screen, start discovery on-demand
-    if (screen === 'bluetooth') {
-      bluetooth.initOnDemand()
-    }
   }
 
   setTimeout(() => {
@@ -110,7 +97,7 @@ function navigateBack() {
   if (isAnimating.value) return
   isAnimating.value = true
 
-  if (currentScreen.value === 'wifi' || currentScreen.value === 'bluetooth') {
+  if (currentScreen.value === 'wifi') {
     subpageClasses.value = 'translate-x-full opacity-0'
     networkClasses.value = 'translate-x-0 opacity-100'
     setTimeout(() => {
@@ -355,62 +342,10 @@ function handleCancelForgetWifi() {
   wifiToForget.value = null
 }
 
-// ------------------------------------------------------------
-// Bluetooth Actions
-// ------------------------------------------------------------
-async function handleBluetoothClick(device: { address: string; name: string; connected: boolean }) {
-  if (device.connected) {
-    const success = await bluetooth.disconnectDevice(device.address)
-    if (success) {
-      toast.info(`Disconnected from ${device.name}`)
-    }
-  } else {
-    toast.info(`Connecting to ${device.name}...`)
-    const success = await bluetooth.connectDevice(device.address)
-    if (success) {
-      toast.success(`Connected to ${device.name}`)
-    } else {
-      toast.error('Connection failed')
-    }
-  }
-}
-
-// Long press to forget device
-function handleDevicePressStart(device: { address: string; name: string }) {
-  longPressTimer = setTimeout(() => {
-    deviceToForget.value = device
-    showForgetModal.value = true
-  }, 800)
-}
-
-function handleDevicePressEnd() {
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-}
-
-async function handleForgetDevice() {
-  if (!deviceToForget.value) return
-
-  const name = deviceToForget.value.name
-  await bluetooth.forgetDevice(deviceToForget.value.address)
-  toast.success(`Forgot ${name}`)
-  showForgetModal.value = false
-  deviceToForget.value = null
-}
-
-function handleCancelForget() {
-  showForgetModal.value = false
-  deviceToForget.value = null
-}
-
 // Keyboard navigation
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    if (showForgetModal.value) {
-      handleCancelForget()
-    } else if (showPasswordModal.value) {
+    if (showPasswordModal.value) {
       handleCancelPassword()
     } else if (currentScreen.value !== 'main') {
       navigateBack()
@@ -453,7 +388,7 @@ onUnmounted(() => {
                   Connection Lost
                 </h2>
                 <p class="text-[28px] text-white/60 tracking-tight w-[32rem]">
-                  Enable Bluetooth Tethering and connect to "Nocturne" in your phone's settings.
+                  Connect to a Wi-Fi network to get started.
                 </p>
 
                 <button
@@ -514,35 +449,15 @@ onUnmounted(() => {
               <ChevronRightIcon class="w-8 h-8 text-white/60" />
             </button>
 
-            <!-- Bluetooth -->
-            <button
-              class="flex items-center justify-between w-full p-4 bg-white/10 rounded-xl hover:bg-white/20 transition-colors border border-white/10 focus:outline-none"
-              @click="navigateTo('bluetooth')"
-            >
-              <div class="flex items-center">
-                <div class="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
-                  <BluetoothIcon class="w-7 h-7 text-white" />
-                </div>
-                <div class="ml-4 text-left">
-                  <span class="text-[32px] font-[580] text-white tracking-tight block">
-                    Bluetooth
-                  </span>
-                  <span v-if="bluetooth.devices.value.find(d => d.connected)" class="text-[20px] text-white/60">
-                    {{ bluetooth.devices.value.find(d => d.connected)?.name }}
-                  </span>
-                </div>
-              </div>
-              <ChevronRightIcon class="w-8 h-8 text-white/60" />
-            </button>
           </div>
         </div>
       </div>
 
-      <!-- Wi-Fi / Bluetooth Subpage -->
+      <!-- Wi-Fi Subpage -->
       <div
         class="absolute top-0 left-0 w-full h-full transition-all duration-300 ease-out"
         :class="subpageClasses"
-        :style="{ visibility: (currentScreen === 'wifi' || currentScreen === 'bluetooth') || isAnimating ? 'visible' : 'hidden' }"
+        :style="{ visibility: currentScreen === 'wifi' || isAnimating ? 'visible' : 'hidden' }"
       >
         <div class="p-12 h-full overflow-y-auto">
           <div class="flex items-center justify-between mb-8">
@@ -554,13 +469,12 @@ onUnmounted(() => {
                 <ChevronLeftIcon class="w-8 h-8 text-white" />
               </button>
               <h2 class="text-[46px] font-[580] text-white tracking-tight">
-                {{ currentScreen === 'wifi' ? 'Wi-Fi' : 'Bluetooth' }}
+                Wi-Fi
               </h2>
             </div>
 
             <!-- Refresh button -->
             <button
-              v-if="currentScreen === 'wifi'"
               class="p-2 rounded-full hover:bg-white/10 transition-colors focus:outline-none"
               :disabled="wifi.isScanning.value"
               @click="wifi.refresh()"
@@ -568,17 +482,6 @@ onUnmounted(() => {
               <RefreshIcon
                 class="w-6 h-6 text-white/60"
                 :class="{ 'animate-spin': wifi.isScanning.value }"
-              />
-            </button>
-            <button
-              v-else
-              class="p-2 rounded-full hover:bg-white/10 transition-colors focus:outline-none"
-              :disabled="bluetooth.isLoading.value"
-              @click="bluetooth.refresh()"
-            >
-              <RefreshIcon
-                class="w-6 h-6 text-white/60"
-                :class="{ 'animate-spin': bluetooth.isLoading.value }"
               />
             </button>
           </div>
@@ -663,60 +566,6 @@ onUnmounted(() => {
             </template>
           </div>
 
-          <!-- Bluetooth Content -->
-          <div v-if="currentScreen === 'bluetooth'" class="space-y-6">
-            <!-- Loading state -->
-            <div v-if="bluetooth.isLoading.value && bluetooth.devices.value.length === 0" class="space-y-4">
-              <div class="h-24 bg-white/10 rounded-xl animate-pulse" />
-              <div class="h-24 bg-white/10 rounded-xl animate-pulse" />
-            </div>
-
-            <!-- Devices list -->
-            <template v-else>
-              <div v-if="bluetooth.devices.value.length > 0" class="space-y-4">
-                <div
-                  v-for="device in bluetooth.devices.value"
-                  :key="device.address"
-                  class="p-4 bg-white/10 rounded-xl border border-white/10 select-none"
-                  @mousedown="handleDevicePressStart({ address: device.address, name: device.name || device.alias || 'Unknown Device' })"
-                  @mouseup="handleDevicePressEnd"
-                  @mouseleave="handleDevicePressEnd"
-                  @touchstart="handleDevicePressStart({ address: device.address, name: device.name || device.alias || 'Unknown Device' })"
-                  @touchend="handleDevicePressEnd"
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center">
-                      <BluetoothIcon class="w-6 h-6 text-white mr-4" />
-                      <div>
-                        <span class="text-[28px] font-[560] text-white block">
-                          {{ device.name || device.alias || 'Unknown Device' }}
-                        </span>
-                        <span v-if="device.connected" class="text-[20px] text-white/60">
-                          Connected
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white text-[24px] transition-colors focus:outline-none"
-                      :disabled="bluetooth.isConnecting.value"
-                      @click.stop="handleBluetoothClick(device)"
-                    >
-                      {{ device.connected ? 'Disconnect' : 'Connect' }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- No devices -->
-              <div v-else class="text-center py-12">
-                <BluetoothIcon class="w-12 h-12 text-white/40 mx-auto mb-4" />
-                <p class="text-[32px] font-[580] text-white">No Devices Found</p>
-                <p class="text-[24px] text-white/60 mt-2">
-                  Connect to "Nocturne" in your phone's Bluetooth settings.
-                </p>
-              </div>
-            </template>
-          </div>
         </div>
       </div>
     </div>
@@ -760,39 +609,6 @@ onUnmounted(() => {
               @click="handlePasswordSubmit"
             >
               {{ wifi.isConnecting.value ? 'Connecting...' : 'Connect' }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Forget Device Modal (Bluetooth) -->
-      <div
-        v-if="showForgetModal"
-        class="fixed inset-0 z-[100] flex items-center justify-center"
-      >
-        <div class="absolute inset-0 bg-black/60" @click="handleCancelForget" />
-        <div class="relative bg-[#161616] rounded-2xl pt-5 w-full max-w-md mx-4 overflow-hidden">
-          <div class="text-center px-6">
-            <h3 class="text-[36px] font-[560] text-white">
-              Forget Device?
-            </h3>
-            <p class="text-[28px] text-white/60 mt-2">
-              Pair this device again to use it.
-            </p>
-          </div>
-
-          <div class="flex mt-5 border-t border-white/10">
-            <button
-              class="flex-1 py-4 text-[28px] font-[560] text-blue-400 hover:bg-white/5 focus:outline-none border-r border-white/10"
-              @click="handleCancelForget"
-            >
-              Cancel
-            </button>
-            <button
-              class="flex-1 py-4 text-[28px] font-[560] text-red-500 hover:bg-white/5 focus:outline-none"
-              @click="handleForgetDevice"
-            >
-              Forget
             </button>
           </div>
         </div>

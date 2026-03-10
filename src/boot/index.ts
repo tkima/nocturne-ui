@@ -8,7 +8,6 @@ import { useSpotifyStore } from '@/stores/spotify'
 import { createSettingsComponent } from './SettingsComponent'
 import { createAuthComponent } from './AuthComponent'
 import { createNetworkComponent } from './NetworkComponent'
-import { createBluetoothComponent } from './BluetoothComponent'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('Boot')
@@ -23,10 +22,9 @@ let bootStarted = false
  * Phase 1 / init (blocking - for loading screen):
  *   1. Settings → load settings from file
  *
- * Phase 2 / connect (background - after loading screen):
- *   2. Bluetooth → start polling
- *   3. Network → wait until connected (max 15s)
- *   4. Auth → validate token via API (only if network ready)
+ * Phase 2 / connect (after loading screen):
+ *   2. Network → wait until connected (max 15s)
+ *   3. Auth → validate token via API (only if network ready)
  */
 export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
   const bootStore = useBootStore()
@@ -59,35 +57,32 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 500))
     const networkComponent = createNetworkComponent()
     bootStore.setProgress(30)
-    await new Promise(resolve => setTimeout(resolve, 500))
-    const bluetoothComponent = createBluetoothComponent()
 
     // Register with store
     bootStore.registerComponent(settingsComponent)
     bootStore.registerComponent(authComponent)
     bootStore.registerComponent(networkComponent)
-    bootStore.registerComponent(bluetoothComponent)
     log.info('Components registered with boot store')
 
-    log.info('[1/4] Settings...')
-    bootStore.setProgress(50)
+    log.info('[1/3] Settings...')
+    bootStore.setProgress(30)
     await settingsComponent.startup()
-    bootStore.setProgress(70)
+    bootStore.setProgress(35)
     const settingsOk = await settingsComponent.init()
     await new Promise(resolve => setTimeout(resolve, 1000))
     if (!settingsOk) {
       log.error('Settings failed to load - boot may fail!')
     }
-    bootStore.setProgress(100)
+    bootStore.setProgress(40)
 
-    // Mark critical phase done - loading screen will complete
+    // Mark critical phase done (settings loaded, Phase 2 continues)
     bootStore.bootPhase = 'critical'
     const phase1Time = Date.now() - startTime
     log.success(`Phase 1 complete in ${phase1Time}ms - loading screen can close`)
   }
 
   // ============================================================
-  // Phase 2 / connect: Network + Auth (background - after loading screen)
+  // Phase 2 / connect: Network + Auth (loading screen stays until complete)
   // ============================================================
   if (!phase || phase === 'connect') {
     if (phase === 'connect') {
@@ -97,7 +92,6 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
     }
 
     // Get components from store
-    const bluetoothComponent = bootStore.getComponent('bluetooth')
     const networkComponent = bootStore.getComponent('network')
     const authComponent = bootStore.getComponent('auth')
 
@@ -106,29 +100,18 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
       return
     }
 
-    // Start bluetooth (skip on reconnect - already polling)
-    if (!phase && bluetoothComponent) {
-      log.info('[2/4] Bluetooth (background)...')
-      bluetoothComponent.startup()
-        .then(() => {
-          const elapsed = Date.now() - startTime
-          log.success(`Bluetooth ready after ${elapsed}ms total`)
-        })
-        .catch((e) => {
-          log.error(`Bluetooth startup failed: ${e}`)
-        })
-    }
-
-    // Network + Auth in background (don't block UI)
-    log.info(`[3/4] Network (${phase === 'connect' ? 'reconnect' : 'background'}, max 15s)...`)
+    // Network + Auth (loading screen stays until complete)
+    log.info(`[2/3] Network (${phase === 'connect' ? 'reconnect' : 'checking'}, max 15s)...`)
+    bootStore.setProgress(50)
     networkComponent.startup()
       .then(async () => {
         const networkTime = Date.now() - startTime
         log.info(`Network complete in ${networkTime}ms, connected=${bootStore.networkReady}`)
+        bootStore.setProgress(75)
 
-        // 4. Auth - only run if network connected
+        // 3. Auth - only run if network connected
         if (bootStore.networkReady) {
-          log.info('[4/4] Auth (validating token)...')
+          log.info('[3/3] Auth (validating token)...')
           await authComponent.startup()
           await authComponent.init()
           authComponent.startPolling?.()
@@ -144,12 +127,15 @@ export async function startBoot(phase?: 'init' | 'connect'): Promise<void> {
             spotifyStore.fetchCurrentPlayback()
           }, 1000)
         } else {
-          log.warn('[4/4] Auth skipped - no network')
+          log.warn('[3/3] Auth skipped - no network')
         }
+        bootStore.setProgress(100)
         bootStore.bootPhase = 'ready'
       })
       .catch((e) => {
         log.error(`Network/Auth failed: ${e}`)
+        bootStore.setProgress(100)
+        bootStore.bootPhase = 'ready'
       })
   }
 }
@@ -166,7 +152,6 @@ export type { BootComponent, BootStatus, BootComponentName } from './types'
 export { createSettingsComponent } from './SettingsComponent'
 export { createAuthComponent } from './AuthComponent'
 export { createNetworkComponent } from './NetworkComponent'
-export { createBluetoothComponent, hasConnectedDevice } from './BluetoothComponent'
 
 // Export test utilities (also registers on window object)
 export { testAuthBoot, testTokenValidation, testTokenRefresh } from './testAuthBoot'

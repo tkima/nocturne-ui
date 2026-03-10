@@ -1,15 +1,14 @@
 <!-- ============================================================
-     Library View - Liked songs + User playlists
+     Library View - Liked songs + User playlists + Radio mixes
      ============================================================ -->
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
 import HorizontalScroll from '@/components/content/HorizontalScroll.vue'
 import MediaCard from '@/components/content/MediaCard.vue'
-import { logger } from '@/utils/logger'
-import type { Track } from '@/types'
+import { formatCount } from '@/utils/format'
 
 // ------------------------------------------------------------
 // Router & Stores
@@ -21,57 +20,94 @@ const authStore = useAuthStore()
 // ------------------------------------------------------------
 // Computed
 // ------------------------------------------------------------
-const playlists = computed(() => spotifyStore.userPlaylists)
 const savedTracksTotal = computed(() => spotifyStore.savedTracksTotal)
 const isLoading = computed(() => spotifyStore.isLoading)
+
+// Combine playlists + radio mixes into one deduplicated list
+const libraryItems = computed(() => {
+  const seen = new Set<string>()
+  const items: Array<{
+    id: string
+    type: 'playlist' | 'radio' | 'artist-radio'
+    name: string
+    subtitle: string
+    imageUrl: string
+  }> = []
+
+  // User playlists first
+  for (const playlist of spotifyStore.userPlaylists) {
+    if (seen.has(playlist.id)) continue
+    seen.add(playlist.id)
+    items.push({
+      id: playlist.id,
+      type: 'playlist',
+      name: playlist.name,
+      subtitle: formatCount(playlist.tracks?.total || 0, 'Songs'),
+      imageUrl: playlist.images?.[0]?.url || ''
+    })
+  }
+
+  // Radio mixes (only those not already shown as playlists)
+  for (const radio of spotifyStore.radioMixes) {
+    if (seen.has(radio.id)) continue
+    seen.add(radio.id)
+    items.push({
+      id: radio.id,
+      type: radio.type === 'artist' ? 'artist-radio' : 'radio',
+      name: radio.name,
+      subtitle: radio.owner?.display_name || 'Spotify',
+      imageUrl: radio.images?.[0]?.url || ''
+    })
+  }
+
+  return items
+})
 
 // ------------------------------------------------------------
 // Methods
 // ------------------------------------------------------------
-function formatTrackCount(count: number): string {
-  return count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' Songs'
+function handleLikedSongsClick() {
+  router.push('/liked-songs')
 }
 
-async function handleLikedSongsClick() {
-  logger.info('Play liked songs')
-  // Play saved tracks
-  const tracks = spotifyStore.savedTracks
-  if (tracks.length > 0) {
-    const trackUris = tracks.map((t: Track) => t.uri)
-    spotifyStore.play({ uris: trackUris })
+async function handleItemClick(item: { id: string; type: string }) {
+  if (item.type === 'artist-radio') {
+    await spotifyStore.setShuffle(true)
+    spotifyStore.play({ context_uri: `spotify:artist:${item.id}` })
     router.push('/now-playing')
+  } else if (item.type === 'radio') {
+    await spotifyStore.setShuffle(true)
+    spotifyStore.play({ context_uri: `spotify:playlist:${item.id}` })
+    router.push('/now-playing')
+  } else {
+    router.push(`/playlist/${item.id}`)
   }
-}
-
-function handlePlaylistClick(playlistId: string) {
-  logger.info('Play playlist', { playlistId })
-  spotifyStore.play({ context_uri: `spotify:playlist:${playlistId}` })
-  router.push('/now-playing')
 }
 
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await Promise.all([
       spotifyStore.fetchUserPlaylists(),
-      spotifyStore.fetchSavedTracks()
+      spotifyStore.fetchSavedTracks(),
+      spotifyStore.fetchRadioMixes()
     ])
   }
-})
+}, { immediate: true })
 </script>
 
 <template>
   <div class="h-full">
     <!-- Loading state -->
-    <div v-if="isLoading && playlists.length === 0" class="flex items-center justify-center h-full">
+    <div v-if="isLoading && libraryItems.length === 0" class="flex items-center justify-center h-full">
       <div class="w-12 h-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
     </div>
 
     <!-- No content -->
     <div
-      v-else-if="playlists.length === 0 && savedTracksTotal === 0"
+      v-else-if="libraryItems.length === 0 && savedTracksTotal === 0"
       class="flex items-center justify-center h-full"
     >
       <p class="text-white/60 text-2xl">No library content found</p>
@@ -79,9 +115,9 @@ onMounted(async () => {
 
     <!-- Library content -->
     <HorizontalScroll v-else>
-      <!-- Liked Songs card (first item) - matches MediaCard structure -->
+      <!-- Liked Songs card (first item) -->
       <div
-        class="pl-2 mr-10 snap-start cursor-pointer"
+        class="pl-2 mr-10 cursor-pointer"
         style="min-width: var(--album-art-size)"
         @click="handleLikedSongsClick"
       >
@@ -94,19 +130,19 @@ onMounted(async () => {
           Liked Songs
         </h4>
         <h4 class="text-[32px] font-[560] text-white/60 truncate tracking-tight" style="max-width: var(--album-art-size)">
-          {{ formatTrackCount(savedTracksTotal) }}
+          {{ formatCount(savedTracksTotal, 'Songs') }}
         </h4>
       </div>
 
-      <!-- User playlists -->
+      <!-- All library items (playlists + radios, deduplicated) -->
       <MediaCard
-        v-for="playlist in playlists"
-        :key="playlist.id"
-        :id="playlist.id"
-        :name="playlist.name"
-        :subtitle="formatTrackCount(playlist.tracks?.total || 0)"
-        :image-url="playlist.images?.[0]?.url || ''"
-        @click="handlePlaylistClick(playlist.id)"
+        v-for="item in libraryItems"
+        :key="item.id"
+        :id="item.id"
+        :name="item.name"
+        :subtitle="item.subtitle"
+        :image-url="item.imageUrl"
+        @click="handleItemClick(item)"
       />
     </HorizontalScroll>
   </div>

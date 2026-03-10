@@ -10,7 +10,6 @@ import { ref, computed, readonly } from 'vue'
 import type { BootComponent, BootStatus } from './types'
 import { useAuthStore } from '@/stores/auth'
 import { useSettings } from '@/composables/useSettings'
-import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/debug'
 
 const log = createLogger('AuthBoot')
@@ -46,11 +45,8 @@ export function createAuthComponent(): BootComponent {
   const status = ref<BootStatus>('idle')
   const error = ref<string | null>(null)
 
-  let pollingId: ReturnType<typeof setInterval> | null = null
-
   const authStore = useAuthStore()
   const { settings } = useSettings()
-  const toast = useToast()
 
   // isReady means "auth init is complete" (not "user is authenticated")
   // The app should show for unauthenticated users too (they see login screen)
@@ -85,11 +81,11 @@ export function createAuthComponent(): BootComponent {
           log.warn('Token invalid, trying refresh...')
           const refreshed = await authStore.refreshAccessToken()
           if (!refreshed) {
-            log.error('Token refresh failed, clearing tokens')
-            authStore.accessToken = null
-            authStore.refreshToken = null
-            authStore.tokenExpiry = null
-            toast.error('Authentication failed', 3000)
+            // Don't clear tokens here - they may still be valid
+            // (e.g. Spotify returned 500/429/503 temporarily)
+            // Only invalid_grant clears tokens (via logout() in auth store)
+            // The 5-minute polling will retry refresh later
+            log.warn('Token refresh failed - keeping tokens for retry')
           } else {
             log.success('Token refreshed successfully')
           }
@@ -135,23 +131,12 @@ export function createAuthComponent(): BootComponent {
   }
 
   function startPolling(): void {
-    if (pollingId) return
-    log.info('startPolling() - checking token every 5min')
-
-    // Check token expiry every 5 minutes
-    pollingId = setInterval(async () => {
-      if (authStore.isAuthenticated && authStore.isTokenExpired) {
-        log.info('Token expired during poll, refreshing...')
-        await reconnect()
-      }
-    }, 5 * 60 * 1000)
+    // No-op: token refresh is now handled on-demand when API calls get 401
+    log.info('startPolling() - no heartbeat needed, refresh on 401')
   }
 
   function stopPolling(): void {
-    if (pollingId) {
-      clearInterval(pollingId)
-      pollingId = null
-    }
+    // No-op
   }
 
   return {

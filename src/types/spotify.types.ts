@@ -44,7 +44,7 @@ export interface Playlist {
   name: string
   images: SpotifyImage[]
   tracks: { total: number }
-  type: 'playlist'
+  type: 'playlist' | 'artist'
   owner?: {
     id: string
     display_name: string

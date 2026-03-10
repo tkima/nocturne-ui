@@ -2,7 +2,7 @@
      Artist View - Shows artist's top tracks
      ============================================================ -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSpotifyStore } from '@/stores/spotify'
 import { useAuthStore } from '@/stores/auth'
@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/ui'
 import { useListNavigation } from '@/composables/useListNavigation'
 import MediaListView from '@/components/common/MediaListView.vue'
 import { logger } from '@/utils/logger'
+import { formatCount, getImageUrl } from '@/utils/format'
 import type { Artist, Track } from '@/types'
 
 // ------------------------------------------------------------
@@ -41,24 +42,13 @@ const { selectedIndex: selectedTrackIndex, setSelectedIndex } = useListNavigatio
 // Computed
 // ------------------------------------------------------------
 const artistId = computed(() => route.params.id as string)
-const currentTrackUri = computed(() => spotifyStore.currentPlayback?.item?.uri)
+const currentTrackUri = computed(() => spotifyStore.currentTrackUri)
 
-const artistImage = computed(() => {
-  return artist.value?.images?.[0]?.url || artist.value?.images?.[1]?.url || ''
-})
+const artistImage = computed(() => getImageUrl(artist.value?.images))
 
 const artistName = computed(() => artist.value?.name || 'Unknown Artist')
 
-const followerCount = computed(() => {
-  const count = artist.value?.followers?.total || 0
-  if (count >= 1000000) {
-    const millions = count / 1000000
-    return millions % 1 === 0
-      ? `${Math.floor(millions)}M Followers`
-      : `${millions.toFixed(1)}M Followers`
-  }
-  return count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' Followers'
-})
+const followerCount = computed(() => formatCount(artist.value?.followers?.total || 0, 'Followers'))
 
 // ------------------------------------------------------------
 // Methods
@@ -115,8 +105,8 @@ async function handleTrackPlay(track: Track, index: number) {
 // ------------------------------------------------------------
 // Lifecycle
 // ------------------------------------------------------------
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
+watch(() => authStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
     await fetchArtistData()
     await spotifyStore.fetchCurrentPlayback()
 
@@ -126,7 +116,7 @@ onMounted(async () => {
       setSelectedIndex(playingIndex)
     }
   }
-})
+}, { immediate: true })
 
 // Watch for track changes
 watch(currentTrackUri, (newUri) => {
