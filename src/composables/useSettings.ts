@@ -50,6 +50,8 @@ const DEFAULT_SETTINGS: Settings = {
   buttonMappings: [null, null, null, null],
   // Blocklist
   blockedTracks: [],
+  // Radio history (persisted so duplicate-skip survives reboots)
+  radioTrackHistory: [],
 }
 
 export interface Settings {
@@ -81,6 +83,8 @@ export interface Settings {
   buttonMappings: (ButtonMapping | null)[]
   // Blocklist
   blockedTracks: { id: string; name: string; artist: string }[]
+  // Radio history (persisted so duplicate-skip survives reboots)
+  radioTrackHistory: string[]
 }
 
 // Singleton state

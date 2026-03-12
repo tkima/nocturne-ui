@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useAuthStore } from './auth'
+import { useSettings } from '@/composables/useSettings'
 import type { Track, Album, Artist, Playlist } from '@/types'
 import { logger } from '@/utils/logger'
 import { createLogger } from '@/utils/debug'
@@ -21,6 +22,7 @@ const MAX_RETRIES = 0
 
 export const useSpotifyStore = defineStore('spotify', () => {
   const authStore = useAuthStore()
+  const { get: getSetting, set: setSetting } = useSettings()
 
   // ------------------------------------------------------------
   // State
@@ -51,16 +53,16 @@ export const useSpotifyStore = defineStore('spotify', () => {
   })
   // Rolling history of recently played (only tracks played >20s)
   const radioArtistHistory = ref<string[]>([])
-  const radioTrackHistory = ref<string[]>([])
   const RADIO_HISTORY_MAX = 15
 
   function radioHistoryPush(artistId: string, trackId: string) {
     radioArtistHistory.value.push(artistId)
-    radioTrackHistory.value.push(trackId)
     if (radioArtistHistory.value.length > RADIO_HISTORY_MAX) {
       radioArtistHistory.value.shift()
-      radioTrackHistory.value.shift()
     }
+    const history = [...getSetting('radioTrackHistory'), trackId]
+    if (history.length > RADIO_HISTORY_MAX) history.shift()
+    setSetting('radioTrackHistory', history)
   }
 
   // --- Radio Track Pool (cached related tracks to avoid repeated API calls) ---
@@ -1157,7 +1159,7 @@ export const useSpotifyStore = defineStore('spotify', () => {
     radioMixes,
     isRadioMode,
     radioArtistHistory,
-    radioTrackHistory,
+    get radioTrackHistory() { return getSetting('radioTrackHistory') },
     radioHistoryPush,
     radioPool,
     radioPoolFill,

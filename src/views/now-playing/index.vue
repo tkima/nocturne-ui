@@ -58,6 +58,7 @@ let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
 // --- Radio History ---
 let radioHistoryTrackId: string | null = null  // track we already counted
+let lastSeenPlayingAt = Date.now()
 
 // --- Swipe Gesture State ---
 let touchStartX = 0 // Plain variable, no reactivity needed
@@ -241,6 +242,17 @@ async function pollPlayback() {
   if (playback.value) {
     playbackProgress.value = playback.value.progress_ms || 0
 
+    // Clear radio history if resuming after long pause (e.g. returned to car)
+    if (playback.value.is_playing) {
+      if (Date.now() - lastSeenPlayingAt > 30000) {
+        spotifyStore.radioArtistHistory.splice(0)
+        setSetting('radioTrackHistory', [])
+        radioHistoryTrackId = null
+        logger.info('Radio history cleared (resumed after 30s+ pause)')
+      }
+      lastSeenPlayingAt = Date.now()
+    }
+
     // Radio: add artist to history once progress exceeds 20s
     if (spotifyStore.isRadioMode && playbackProgress.value > 20000) {
       const trackId = playback.value.item?.id
@@ -270,7 +282,7 @@ async function pollPlayback() {
       }
 
       // Artist radio: skip duplicate tracks (already in last 15)
-      if (spotifyStore.isRadioMode && spotifyStore.radioTrackHistory.includes(currentTrackId)) {
+      if (spotifyStore.isRadioMode && getSetting('radioTrackHistory').includes(currentTrackId)) {
         logger.info('Radio: skipping duplicate track', { trackId: currentTrackId })
         await spotifyStore.skipToNext()
         spotifyStore.fetchPlaybackDebounced()
@@ -294,7 +306,7 @@ async function queueRelatedArtistTrack(artistId: string) {
     }
 
     const blockedIds = new Set(getSetting('blockedTracks').map(t => t.id))
-    const track = spotifyStore.radioPoolPick(blockedIds, spotifyStore.radioTrackHistory)
+    const track = spotifyStore.radioPoolPick(blockedIds, getSetting('radioTrackHistory'))
     if (!track) {
       logger.warn('queueRelated: pool empty, no eligible tracks')
       return
