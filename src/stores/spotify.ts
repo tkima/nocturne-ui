@@ -49,15 +49,71 @@ export const useSpotifyStore = defineStore('spotify', () => {
     const uri = currentPlayback.value?.context?.uri
     return !!uri && uri.startsWith('spotify:artist:')
   })
-  // Rolling history of recently played artist IDs (only tracks played >20s)
+  // Rolling history of recently played (only tracks played >20s)
   const radioArtistHistory = ref<string[]>([])
+  const radioTrackHistory = ref<string[]>([])
   const RADIO_HISTORY_MAX = 15
 
-  function radioHistoryPush(artistId: string) {
+  function radioHistoryPush(artistId: string, trackId: string) {
     radioArtistHistory.value.push(artistId)
+    radioTrackHistory.value.push(trackId)
     if (radioArtistHistory.value.length > RADIO_HISTORY_MAX) {
       radioArtistHistory.value.shift()
+      radioTrackHistory.value.shift()
     }
+  }
+
+  // --- Radio Track Pool (cached related tracks to avoid repeated API calls) ---
+  const radioPool = ref<Array<{ uri: string; id: string; name: string; artistName: string }>>([])
+  let radioPoolArtistId: string | null = null
+  let radioPoolFetching = false
+
+  async function radioPoolFill(artistId: string) {
+    if (radioPoolFetching) return
+    radioPoolFetching = true
+    try {
+      const artist = await getArtist(artistId)
+      if (!artist) return
+
+      const results = await search(artist.name, ['artist'])
+      const similar = results?.artists?.items?.filter(a => a.id !== artistId) || []
+      if (!similar.length) return
+
+      const shuffled = [...similar].sort(() => Math.random() - 0.5)
+      const existingIds = new Set(radioPool.value.map(t => t.id))
+
+      for (const simArtist of shuffled.slice(0, 8)) {
+        const trackResults = await search(simArtist.name, ['track'])
+        const tracks = trackResults?.tracks?.items || []
+        for (const t of tracks) {
+          if (existingIds.has(t.id)) continue
+          if (!t.artists?.some(a => a.id === simArtist.id)) continue
+          existingIds.add(t.id)
+          radioPool.value.push({ uri: t.uri, id: t.id, name: t.name, artistName: simArtist.name })
+        }
+        if (radioPool.value.length >= 50) break
+      }
+
+      radioPoolArtistId = artistId
+      log.info(`Radio pool: ${radioPool.value.length} tracks`)
+    } finally {
+      radioPoolFetching = false
+    }
+  }
+
+  function radioPoolPick(blockedIds: Set<string>, playedIds: string[]): { uri: string; id: string; name: string; artistName: string } | null {
+    const playedSet = new Set(playedIds)
+    const eligible = radioPool.value.filter(t => !blockedIds.has(t.id) && !playedSet.has(t.id))
+    if (!eligible.length) return null
+    const idx = Math.floor(Math.random() * eligible.length)
+    const track = eligible[idx]!
+    // Remove from pool
+    radioPool.value = radioPool.value.filter(t => t.id !== track.id)
+    return track
+  }
+
+  function radioPoolNeedsFill(artistId: string): boolean {
+    return radioPoolArtistId !== artistId || radioPool.value.length < 30
   }
 
   const isLoading = ref(false)
@@ -1101,7 +1157,12 @@ export const useSpotifyStore = defineStore('spotify', () => {
     radioMixes,
     isRadioMode,
     radioArtistHistory,
+    radioTrackHistory,
     radioHistoryPush,
+    radioPool,
+    radioPoolFill,
+    radioPoolPick,
+    radioPoolNeedsFill,
     queue,
     nextTrack,
     currentEpisodeContext,
