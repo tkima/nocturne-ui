@@ -45,6 +45,21 @@ export const useSpotifyStore = defineStore('spotify', () => {
     episodeDuration: number
     episodeImages: Array<{ url: string }>
   } | null>(null)
+  const isRadioMode = computed(() => {
+    const uri = currentPlayback.value?.context?.uri
+    return !!uri && uri.startsWith('spotify:artist:')
+  })
+  // Rolling history of recently played artist IDs (only tracks played >20s)
+  const radioArtistHistory = ref<string[]>([])
+  const RADIO_HISTORY_MAX = 15
+
+  function radioHistoryPush(artistId: string) {
+    radioArtistHistory.value.push(artistId)
+    if (radioArtistHistory.value.length > RADIO_HISTORY_MAX) {
+      radioArtistHistory.value.shift()
+    }
+  }
+
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   // Retry state - when true, user needs to manually retry
@@ -329,10 +344,8 @@ export const useSpotifyStore = defineStore('spotify', () => {
     await enforceRateLimit()
 
     const method = options.method || 'GET'
-    const requestId = generateRequestId()
+    generateRequestId()
     const startTime = Date.now()
-
-    logger.info('API request', { requestId, method, endpoint })
 
     try {
       const response = await fetch(`${SPOTIFY_API_BASE}${endpoint}`, {
@@ -345,7 +358,6 @@ export const useSpotifyStore = defineStore('spotify', () => {
       })
 
       const duration = Date.now() - startTime
-      logger.info('API response', { requestId, method, endpoint, status: response.status, duration })
 
       recordRequest(endpoint, method, response.status, duration, retryCount)
 
@@ -357,7 +369,13 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
       if (response.ok) {
         clearRetryState()
-        return await response.json()
+        const text = await response.text()
+        if (!text) return null
+        try {
+          return JSON.parse(text)
+        } catch {
+          return null
+        }
       }
 
       // Error responses
@@ -551,21 +569,9 @@ export const useSpotifyStore = defineStore('spotify', () => {
     // Include additional_types=episode to get full episode data for podcasts
     const data = await apiRequest<SpotifyPlayback>('/me/player?additional_types=episode')
     if (data) {
-      // Log playback state to debug overlay
       const itemName = data.item?.name || 'None'
       const playState = data.is_playing ? 'playing' : 'paused'
       log.info(`Poll: ${itemName.slice(0, 20)}.. (${playState})`)
-
-      logger.info('Playback data', {
-        type: data.currently_playing_type,
-        itemName: data.item?.name,
-        duration: data.item?.duration_ms,
-        hasShow: !!data.item?.show,
-        showName: data.item?.show?.name,
-        showId: data.item?.show?.id,
-        hasImages: !!data.item?.images,
-        imageUrl: data.item?.images?.[0]?.url,
-      })
       currentPlayback.value = data
     } else {
       log.warn('Poll: No playback')
@@ -1093,6 +1099,9 @@ export const useSpotifyStore = defineStore('spotify', () => {
     savedTracksTotal,
     userShows,
     radioMixes,
+    isRadioMode,
+    radioArtistHistory,
+    radioHistoryPush,
     queue,
     nextTrack,
     currentEpisodeContext,

@@ -56,6 +56,11 @@ const wheelDeltaAccumulator = ref(0)
 const pendingSeekPosition = ref<number | null>(null)
 let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
+// --- Radio Artist Diversity ---
+const RADIO_MAX_ARTIST_RATIO = 0.5
+let radioHistoryTrackId: string | null = null  // track we already counted
+let radioSkippedLast = false  // prevent skip loops
+
 // --- Swipe Gesture State ---
 let touchStartX = 0 // Plain variable, no reactivity needed
 const swipeThreshold = 30 // Minimum distance for swipe
@@ -238,6 +243,20 @@ async function pollPlayback() {
   if (playback.value) {
     playbackProgress.value = playback.value.progress_ms || 0
 
+    // Radio: add artist to history once progress exceeds 20s
+    if (spotifyStore.isRadioMode && playbackProgress.value > 20000) {
+      const trackId = playback.value.item?.id
+      const artistId = playback.value.item?.artists?.[0]?.id
+      if (trackId && artistId && trackId !== radioHistoryTrackId) {
+        radioHistoryTrackId = trackId
+        spotifyStore.radioHistoryPush(artistId)
+        logger.info('Radio history: added', {
+          artist: playback.value.item?.artists?.[0]?.name,
+          history: spotifyStore.radioArtistHistory.length,
+        })
+      }
+    }
+
     // Check if track changed and auto-skip if blocked
     const currentTrackId = playback.value.item?.id || null
     if (currentTrackId && currentTrackId !== lastPolledTrackId) {
@@ -252,49 +271,99 @@ async function pollPlayback() {
         return
       }
 
-      // Artist radio: queue a related artist track
-      if (parsedContext.value.type === 'artist' && parsedContext.value.id) {
-        queueRelatedArtistTrack(parsedContext.value.id)
+      // Artist radio: enforce 50% ratio
+      const isRadio = spotifyStore.isRadioMode
+      const ctxType = parsedContext.value.type
+      const ctxId = parsedContext.value.id
+      logger.info('Radio check', {
+        isRadio,
+        ctxType,
+        ctxId,
+        currentArtist: playback.value.item?.artists?.[0]?.name,
+        historyLen: spotifyStore.radioArtistHistory.length,
+      })
+
+      if (isRadio && ctxType === 'artist' && ctxId) {
+        const radioArtistId = ctxId
+        const currentArtistId = playback.value.item?.artists?.[0]?.id
+        const history = spotifyStore.radioArtistHistory
+        const radioCount = history.filter(id => id === radioArtistId).length
+        const wouldBeRatio = (radioCount + 1) / (history.length + 1)
+
+        logger.info('Radio ratio', {
+          radioArtist: radioArtistId,
+          currentArtist: currentArtistId,
+          radioCount,
+          historyLen: history.length,
+          wouldBeRatio: wouldBeRatio.toFixed(2),
+          wouldSkip: currentArtistId === radioArtistId && wouldBeRatio > RADIO_MAX_ARTIST_RATIO,
+        })
+
+        if (currentArtistId === radioArtistId && wouldBeRatio > RADIO_MAX_ARTIST_RATIO && !radioSkippedLast) {
+          logger.info('Radio diversity: over ratio, queueing + skipping')
+          radioSkippedLast = true
+          await queueRelatedArtistTrack(radioArtistId)
+          await spotifyStore.skipToNext()
+          spotifyStore.fetchPlaybackDebounced()
+          return
+        }
+
+        // Reset skip guard when a non-radio-artist track plays
+        if (currentArtistId !== radioArtistId) {
+          radioSkippedLast = false
+        }
+
+        // Queue a related track for next round
+        queueRelatedArtistTrack(radioArtistId)
       }
     }
   }
 }
 
-/** Queue a random track from a similar artist (fire-and-forget) */
+/** Queue a random track from a similar artist (via search) */
 async function queueRelatedArtistTrack(artistId: string) {
   try {
     const artist = await spotifyStore.getArtist(artistId)
-    if (!artist) return
+    if (!artist) {
+      logger.warn('queueRelated: artist not found', { artistId })
+      return
+    }
 
-    // Search for similar artists via Spotify search (returns related results)
+    logger.info('queueRelated: searching similar artists for', { name: artist.name })
     const artistResults = await spotifyStore.search(artist.name, ['artist'])
     const similarArtists = artistResults?.artists?.items?.filter(a => a.id !== artistId)
+    logger.info('queueRelated: found similar artists', { count: similarArtists?.length || 0 })
     if (!similarArtists?.length) return
 
-    // Pick a random similar artist, search for their tracks
-    const randomArtist = similarArtists[Math.floor(Math.random() * similarArtists.length)]
-    if (!randomArtist) return
-    const trackResults = await spotifyStore.search(randomArtist.name, ['track'])
-    const tracks = trackResults?.tracks?.items
-    if (!tracks?.length) return
-
-    // Filter out blocked tracks and original artist
     const blockedIds = new Set(getSetting('blockedTracks').map(t => t.id))
-    const eligible = tracks.filter(t =>
-      !blockedIds.has(t.id) &&
-      t.artists?.some(a => a.id === randomArtist.id)
-    )
-    if (!eligible.length) return
 
-    const randomTrack = eligible[Math.floor(Math.random() * eligible.length)]
-    if (!randomTrack) return
-    await spotifyStore.addToQueue(randomTrack.uri)
-    logger.info('Queued related track', {
-      track: randomTrack.name,
-      artist: randomArtist.name,
-    })
+    // Shuffle and try up to 5 similar artists
+    const shuffled = [...similarArtists].sort(() => Math.random() - 0.5)
+    for (const simArtist of shuffled.slice(0, 5)) {
+      logger.info('queueRelated: searching tracks for', { artist: simArtist.name })
+      const trackResults = await spotifyStore.search(simArtist.name, ['track'])
+      const tracks = trackResults?.tracks?.items
+      if (!tracks?.length) continue
+
+      const eligible = tracks.filter(t =>
+        !blockedIds.has(t.id) &&
+        t.artists?.some(a => a.id === simArtist.id)
+      )
+      logger.info('queueRelated: eligible', { artist: simArtist.name, eligible: eligible.length, total: tracks.length })
+      if (!eligible.length) continue
+
+      const randomTrack = eligible[Math.floor(Math.random() * eligible.length)]
+      if (!randomTrack) continue
+      await spotifyStore.addToQueue(randomTrack.uri)
+      logger.info('queueRelated: SUCCESS queued', {
+        track: randomTrack.name,
+        artist: simArtist.name,
+      })
+      return
+    }
+    logger.warn('queueRelated: tried 5 artists, none had eligible tracks')
   } catch (err) {
-    logger.error('Failed to queue related track', { error: err })
+    logger.error('queueRelated: FAILED', { error: err })
   }
 }
 

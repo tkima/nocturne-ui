@@ -141,7 +141,7 @@ async function handleLoadingComplete() {
 
   if (isAuth) {
     // Auth validated - go to main app
-    const startRoute = settings.value.startWithNowPlaying ? '/now-playing' : '/radio'
+    const startRoute = (!import.meta.env.DEV && settings.value.startWithNowPlaying) ? '/now-playing' : '/radio'
     log.info(`Authenticated -> ${startRoute}`)
     if (route.path !== startRoute) {
       router.replace(startRoute)
