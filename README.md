@@ -60,6 +60,8 @@ This is a complete and stable rewrite of the original React-based Nocturne UI in
 
 - 🎵 **Full Spotify Control** - Play/pause, skip, shuffle, repeat, seek
 - 📻 **Browse Library** - Recently played, playlists, artists, podcasts
+- 📻 **Artist Radio** - Play artist radio with related artist mixing and duplicate track detection
+- 🚫 **Blocklist** - Block/unblock songs, auto-skip blocked tracks
 - 🎛️ **Preset Buttons** - Map albums/playlists to physical buttons (1-4)
 - 📱 **WiFi & Bluetooth** - Connect via WiFi or iPhone Bluetooth tethering
 - 🔐 **QR Code Auth** - Easy Spotify login via QR code scan
@@ -173,7 +175,7 @@ nocturne-vue/src/
 │   ├── recents/index.vue        # Recently played albums
 │   ├── library/index.vue        # User playlists + liked songs
 │   ├── artists/index.vue        # Top artists
-│   ├── radio/index.vue          # Featured playlists (was DJ mixes)
+│   ├── radio/index.vue          # Artist radio stations with related mixing
 │   ├── podcasts/index.vue       # User's shows
 │   ├── settings/index.vue       # App settings, logout
 │   ├── now-playing/index.vue    # Full-screen player with controls
@@ -222,8 +224,23 @@ nocturne-vue/src/
 ### Playback
 - Real-time playback state polling
 - Play/Pause, Skip, Previous, Shuffle, Repeat
+- Previous under 10s into the song jumps to the previous track; 10s+ restarts the current track
 - Dial seek (knob rotation = ±10s seek)
 - Progress bar with touch/click seek
+- Optimistic play/pause UI update (instant visual feedback)
+
+### Artist Radio
+- Builds radio stations from your top artists (recents + liked songs)
+- Mixes in related artist tracks via a cached track pool (~50 tracks)
+- Pool auto-refills when below 30 tracks (minimal API calls)
+- Skips duplicate tracks (last 15 track history, persisted to settings so it survives reboots)
+- Tracks artist/track history for played songs (>20s)
+
+### Blocklist
+- Block/unblock songs from Now Playing (long-press block icon)
+- Auto-skips blocked tracks when they come up
+- Blocked tracks filtered from radio pool
+- Manage blocked songs in Settings
 
 ### Button Mapping (Presets 1-4)
 - **Short press**: Play mapped content
@@ -244,7 +261,7 @@ The following debug and display options can be toggled in **Settings**:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Debug Overlay** | Off | Shows real-time debug logs on screen with category filtering (App, Auth, Boot, BT, Spotify, Settings). Useful for troubleshooting on-device. |
-| **Start with Now Playing** | Off | Launch directly to Now Playing screen instead of Recents after boot |
+| **Start with Now Playing** | Off | Launch directly to Now Playing screen instead of Radio after boot |
 | **Track Name Scrolling** | On | Animate long track/artist names on Now Playing |
 | **Song Change Gesture** | On | Swipe left/right on Now Playing to skip tracks |
 | **Elapsed Time** | Off | Show elapsed time instead of remaining time on progress bar |
