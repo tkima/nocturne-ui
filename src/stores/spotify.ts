@@ -708,10 +708,10 @@ export const useSpotifyStore = defineStore('spotify', () => {
 
   async function skipToPrevious() {
     log.info('Skip Previous')
-    // If more than 3 seconds into track/episode, restart current
+    // If 10+ seconds into track/episode, restart current; otherwise go to previous
     const progressMs = currentPlayback.value?.progress_ms || 0
-    if (progressMs > 3000) {
-      log.info('Progress > 3s, seeking to start')
+    if (progressMs >= 10000) {
+      log.info('Progress >= 10s, seeking to start')
       await seek(0)
       return
     }
