@@ -1020,16 +1020,19 @@ export const useSpotifyStore = defineStore('spotify', () => {
   }
 
   async function checkIfTrackSaved(trackId: string): Promise<boolean> {
-    const data = await apiRequest<boolean[]>(`/me/library/contains?ids=${trackId}`)
+    const uri = encodeURIComponent(`spotify:track:${trackId}`)
+    const data = await apiRequest<boolean[]>(`/me/library/contains?uris=${uri}`)
     return data?.[0] ?? false
   }
 
   async function saveTrack(trackId: string) {
-    await apiRequest(`/me/library?ids=${trackId}`, { method: 'PUT' })
+    const uri = encodeURIComponent(`spotify:track:${trackId}`)
+    await apiRequest(`/me/library?uris=${uri}`, { method: 'PUT' })
   }
 
   async function removeTrack(trackId: string) {
-    await apiRequest(`/me/library?ids=${trackId}`, { method: 'DELETE' })
+    const uri = encodeURIComponent(`spotify:track:${trackId}`)
+    await apiRequest(`/me/library?uris=${uri}`, { method: 'DELETE' })
   }
 
   // ------------------------------------------------------------
@@ -1054,31 +1057,15 @@ export const useSpotifyStore = defineStore('spotify', () => {
   }
 
   async function getArtistTopTracks(artistId: string) {
-    // Artist top-tracks endpoint removed Feb 2026
-    // Build from user's liked songs + recents filtered by artist
-    const [likedData, recentData] = await Promise.all([
-      apiRequest<{ items: Array<{ track: Track }> }>('/me/tracks?limit=50'),
-      apiRequest<{ items: Array<{ track: Track }> }>('/me/player/recently-played?limit=50'),
-    ])
+    // /artists/{id}/top-tracks deprecated Feb 2026.
+    // Search by artist name then filter to tracks where this artist is credited.
+    const artist = await getArtist(artistId)
+    if (!artist?.name) return { tracks: [] as Track[] }
 
-    const seen = new Set<string>()
-    const tracks: Track[] = []
-
-    for (const source of [likedData?.items, recentData?.items]) {
-      for (const item of source || []) {
-        if (item.track.artists?.some(a => a.id === artistId) && !seen.has(item.track.id)) {
-          seen.add(item.track.id)
-          tracks.push(item.track)
-        }
-      }
-    }
-
+    const results = await search(artist.name, ['track'])
+    const items = results?.tracks?.items || []
+    const tracks = items.filter(t => t.artists?.some(a => a.id === artistId))
     return { tracks }
-  }
-
-  async function getRelatedArtists(artistId: string) {
-    const data = await apiRequest<{ artists: Artist[] }>(`/artists/${artistId}/related-artists`)
-    return data?.artists || []
   }
 
   async function getPlaylist(playlistId: string) {
@@ -1225,7 +1212,6 @@ export const useSpotifyStore = defineStore('spotify', () => {
     getAlbum,
     getArtist,
     getArtistTopTracks,
-    getRelatedArtists,
     getPlaylist,
     getShow,
     getShowEpisodes,

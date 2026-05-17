@@ -20,6 +20,9 @@ export interface ButtonMapping {
   tracks?: string[] | null    // For liked-songs URIs
 }
 
+export type WheelTurnAction = 'seek' | 'skip'
+export type WheelPressAction = 'skipNext' | 'seekForward' | 'playPause'
+
 // Default settings values
 const DEFAULT_SETTINGS: Settings = {
   version: 1,
@@ -29,7 +32,8 @@ const DEFAULT_SETTINGS: Settings = {
   trackNameScrollingEnabled: true,
   songChangeGestureEnabled: true,
   elapsedTimeEnabled: false,
-  dialSeekEnabled: true,
+  wheelTurnAction: 'skip',
+  wheelPressAction: 'seekForward',
   // Display
   use24HourTime: false,
   showStatusBar: true,
@@ -62,7 +66,8 @@ export interface Settings {
   trackNameScrollingEnabled: boolean
   songChangeGestureEnabled: boolean
   elapsedTimeEnabled: boolean
-  dialSeekEnabled: boolean
+  wheelTurnAction: WheelTurnAction
+  wheelPressAction: WheelPressAction
   // Display
   use24HourTime: boolean
   showStatusBar: boolean

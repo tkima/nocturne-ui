@@ -56,6 +56,10 @@ const wheelDeltaAccumulator = ref(0)
 const pendingSeekPosition = ref<number | null>(null)
 let seekDebounceTimeout: ReturnType<typeof setTimeout> | null = null
 
+// --- Wheel-as-skip State (state-based debounce: one skip per track change) ---
+let skipInFlightFromTrackId: string | null = null
+let skipSafetyTimeout: ReturnType<typeof setTimeout> | null = null
+
 // --- Radio History ---
 let radioHistoryTrackId: string | null = null  // track we already counted
 let lastSeenPlayingAt = Date.now()
@@ -92,6 +96,17 @@ const shuffleEnabled = shuffleState
 const repeatMode = repeatState
 const playback = currentPlayback
 const episodeContext = currentEpisodeContext
+
+// Clear wheel-skip lock the moment the track id actually changes
+watch(() => playback.value?.item?.id ?? null, (newId) => {
+  if (skipInFlightFromTrackId !== null && newId !== skipInFlightFromTrackId) {
+    skipInFlightFromTrackId = null
+    if (skipSafetyTimeout) {
+      clearTimeout(skipSafetyTimeout)
+      skipSafetyTimeout = null
+    }
+  }
+})
 
 // Show error with 5s delay, hide immediately when resolved
 watch(needsRetry, (hasError) => {
@@ -179,6 +194,27 @@ function handleArtClick() {
 function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     handleClose()
+  } else if (e.key === 'Enter') {
+    handleWheelPress()
+  }
+}
+
+// Cooldown so a single press doesn't fire twice from key repeat
+let wheelPressLastFiredAt = 0
+function handleWheelPress() {
+  const now = Date.now()
+  if (now - wheelPressLastFiredAt < 300) return
+  wheelPressLastFiredAt = now
+
+  const action = getSetting('wheelPressAction')
+  if (action === 'skipNext') {
+    handleSkipNext()
+  } else if (action === 'seekForward') {
+    const target = Math.min(duration.value, playbackProgress.value + 10000)
+    playbackProgress.value = target
+    spotifyStore.seek(target).catch(() => { /* ignore */ })
+  } else {
+    handlePlayPause()
   }
 }
 
@@ -465,10 +501,37 @@ function handleWheel(e: WheelEvent) {
   const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
   wheelDeltaAccumulator.value += delta
 
-  // Only trigger seek when accumulated delta exceeds threshold
+  // Only trigger action when accumulated delta exceeds threshold
   if (Math.abs(wheelDeltaAccumulator.value) >= 2) {
     const direction = wheelDeltaAccumulator.value > 0 ? 1 : -1
     wheelDeltaAccumulator.value = 0
+
+    // Skip-track mode: state-based debounce.
+    // Fire one skip, then ignore wheel ticks until the playing track actually changes.
+    if (getSetting('wheelTurnAction') === 'skip') {
+      const currentTrackId = playback.value?.item?.id ?? null
+
+      // Already triggered a skip and track hasn't changed yet → ignore this tick
+      if (skipInFlightFromTrackId !== null && currentTrackId === skipInFlightFromTrackId) {
+        return
+      }
+
+      skipInFlightFromTrackId = currentTrackId
+
+      // Safety net: clear the lock if the track ID never changes (API hiccup)
+      if (skipSafetyTimeout) clearTimeout(skipSafetyTimeout)
+      skipSafetyTimeout = setTimeout(() => {
+        skipInFlightFromTrackId = null
+        skipSafetyTimeout = null
+      }, 3000)
+
+      if (direction === 1) {
+        handleSkipNext()
+      } else {
+        handleSkipPrevious()
+      }
+      return
+    }
 
     const seekAmount = 10000 // 10 seconds in ms
     const basePosition = pendingSeekPosition.value !== null

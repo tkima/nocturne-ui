@@ -6,7 +6,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSpotifyStore } from '@/stores/spotify'
-import { useSettings, type BooleanSettingKey } from '@/composables/useSettings'
+import { useSettings, type BooleanSettingKey, type Settings } from '@/composables/useSettings'
 import { useToast } from '@/composables/useToast'
 import { startBoot } from '@/boot'
 import {
@@ -40,6 +40,7 @@ interface SettingItem {
   action?: string
   route?: string
   names?: string[]
+  options?: { value: string; label: string }[]
 }
 
 interface SettingSection {
@@ -85,12 +86,27 @@ const settingsStructure: Record<string, SettingSection> = {
         defaultValue: true,
       },
       {
-        id: 'dial-seek',
-        title: 'Dial Seeks Track',
-        type: 'toggle',
-        description: 'When enabled, the dial skips 10 seconds forward or backward. When disabled, it controls volume.',
-        storageKey: 'dialSeekEnabled',
-        defaultValue: true,
+        id: 'wheel-turn-action',
+        title: 'Wheel Turn',
+        type: 'select',
+        description: 'What turning the wheel does on Now Playing.',
+        storageKey: 'wheelTurnAction',
+        options: [
+          { value: 'seek', label: 'Seek ±10s' },
+          { value: 'skip', label: 'Previous / Next song' },
+        ],
+      },
+      {
+        id: 'wheel-press-action',
+        title: 'Wheel Press',
+        type: 'select',
+        description: 'What pressing the wheel does on Now Playing.',
+        storageKey: 'wheelPressAction',
+        options: [
+          { value: 'playPause', label: 'Play / Pause' },
+          { value: 'skipNext', label: 'Next song' },
+          { value: 'seekForward', label: 'Seek +10s' },
+        ],
       },
     ],
   },
@@ -177,6 +193,15 @@ function getSettingValue(key: string): boolean {
 // Toggle setting via composable (persists to file)
 function toggleSetting(key: string) {
   toggle(key as BooleanSettingKey)
+}
+
+// Get/set string-valued settings (used by select-type items)
+function getSelectValue(key: string): string {
+  return get(key as keyof Settings) as unknown as string
+}
+
+function setSelectValue(key: string, value: string) {
+  set(key as keyof Settings, value as never)
 }
 
 // Navigation
@@ -329,6 +354,42 @@ const activeSectionData = computed(() => {
                       class="absolute top-0.5 left-0.5 w-10 h-10 bg-white rounded-full shadow transition-transform duration-200"
                       :class="getSettingValue(item.storageKey) ? 'translate-x-9' : 'translate-x-0'"
                     />
+                  </button>
+                </div>
+                <p class="text-[28px] font-[560] text-white/60 tracking-tight max-w-[380px]">
+                  {{ item.description }}
+                </p>
+              </div>
+
+              <!-- Select Item (radio-style options) -->
+              <div v-else-if="item.type === 'select' && item.storageKey && item.options" class="space-y-3">
+                <span class="text-[32px] font-[580] text-white tracking-tight">
+                  {{ item.title }}
+                </span>
+                <div class="space-y-2">
+                  <button
+                    v-for="opt in item.options"
+                    :key="opt.value"
+                    class="flex items-center justify-between w-full p-4 rounded-xl border transition-colors"
+                    :class="getSelectValue(item.storageKey) === opt.value
+                      ? 'bg-white/20 border-white/30'
+                      : 'bg-white/10 border-white/10 hover:bg-white/15'"
+                    @click="setSelectValue(item.storageKey!, opt.value)"
+                  >
+                    <span class="text-[28px] font-[580] text-white tracking-tight">
+                      {{ opt.label }}
+                    </span>
+                    <span
+                      class="w-7 h-7 rounded-full border-2 flex items-center justify-center"
+                      :class="getSelectValue(item.storageKey) === opt.value
+                        ? 'border-white'
+                        : 'border-white/40'"
+                    >
+                      <span
+                        v-if="getSelectValue(item.storageKey) === opt.value"
+                        class="w-3.5 h-3.5 bg-white rounded-full"
+                      />
+                    </span>
                   </button>
                 </div>
                 <p class="text-[28px] font-[560] text-white/60 tracking-tight max-w-[380px]">
