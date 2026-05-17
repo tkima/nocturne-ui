@@ -4,6 +4,8 @@
 
 > Full-featured Spotify controller for jailbroken Car Thing devices with a beautiful, responsive UI.
 
+> **Privacy-friendly, no-companion-app fork.** Stays on the v3.0.0 tether approach: internet over iPhone Personal Hotspot (Bluetooth NAP), Spotify auth via on-device QR code, **zero telemetry**, no mobile app required. The upstream Nocturne project moved in a different direction — this fork keeps it tether-only and private.
+
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.x-06B6D4?logo=tailwindcss)](https://tailwindcss.com/)
@@ -58,15 +60,16 @@ This is a complete and stable rewrite of the original React-based Nocturne UI in
 
 ## Features
 
-- 🎵 **Full Spotify Control** - Play/pause, skip, shuffle, repeat, seek
-- 📻 **Browse Library** - Recently played, playlists, artists, podcasts
-- 📻 **Artist Radio** - Play artist radio with related artist mixing and duplicate track detection
-- 🚫 **Blocklist** - Block/unblock songs, auto-skip blocked tracks
-- 🎛️ **Preset Buttons** - Map albums/playlists to physical buttons (1-4)
-- 📱 **WiFi & Bluetooth** - Connect via WiFi or iPhone Bluetooth tethering
-- 🔐 **QR Code Auth** - Easy Spotify login via QR code scan
-- 💾 **Persistent Settings** - Survives reboots (tokens, button mappings)
-- 🌙 **Power Menu** - Shutdown, reboot, brightness control
+- **Full Spotify Control** - Play/pause, skip, shuffle, repeat, seek
+- **Browse Library** - Recently played, playlists, liked songs, artists, podcasts, queue
+- **Artist Radio** - Play artist radio with related-artist mixing, cached track pool, and persisted duplicate skip
+- **Blocklist** - Block/unblock songs, auto-skip blocked tracks, manage list in Settings
+- **Preset Buttons** - Map albums/playlists/artists to physical buttons (1-4) via long-press
+- **Configurable Wheel** - Choose what wheel turn and wheel press do on Now Playing
+- **WiFi Setup** - Scan/connect/forget Wi-Fi networks via the Connector API
+- **QR Code Auth** - Spotify Device Authorization flow (no relay needed) or custom PKCE via relay
+- **Persistent Settings** - All settings + auth tokens stored in `settings.json` on device
+- **Power Menu** - Shutdown, reboot, manual + auto brightness
 
 ## Target Device
 
@@ -151,67 +154,82 @@ VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php
 nocturne-vue/src/
 ├── App.vue                 # Root component with sidebar, power menu, M button handling
 ├── main.ts                 # Entry point with Pinia + Router
-├── index.css               # Tailwind + custom styles (EXACT copy from React)
+├── index.css               # Tailwind + custom styles
 │
 ├── components/
 │   ├── auth/
-│   │   └── QRCodeDisplay.vue    # QR code for Spotify PKCE auth
+│   │   └── QRCodeDisplay.vue        # QR code for Spotify auth
 │   ├── common/
-│   │   ├── icons/               # SVG icon components (NocturneIcon, WifiIcon, etc.)
+│   │   ├── icons/                   # SVG icon components
+│   │   ├── ButtonMappingOverlay.vue # Long-press preset assignment dialog
+│   │   ├── DebugOverlay.vue         # On-device debug log viewer
 │   │   ├── GradientBackground.vue
 │   │   ├── LoadingScreen.vue
-│   │   ├── PowerMenuOverlay.vue # Shutdown/Reboot/Brightness controls
-│   │   ├── ScrollingText.vue
-│   │   └── ButtonMappingOverlay.vue
+│   │   ├── MediaListView.vue        # Album/playlist track listing
+│   │   ├── PowerMenuOverlay.vue     # Shutdown / Reboot / Brightness
+│   │   ├── ToastMessage.vue
+│   │   └── VirtualKeyboard.vue
 │   ├── content/
-│   │   ├── MediaCard.vue        # Reusable album/playlist/artist card
-│   │   └── HorizontalScroll.vue # Scrollable row with keyboard nav
+│   │   ├── HorizontalScroll.vue
+│   │   ├── LoadingCard.vue
+│   │   └── MediaCard.vue
 │   ├── layout/
-│   │   └── Sidebar.vue          # Navigation sidebar
+│   │   └── Sidebar.vue
 │   └── player/
-│       └── ProgressBar.vue      # Playback progress with seek
+│       └── ProgressBar.vue
 │
 ├── views/
-│   ├── recents/index.vue        # Recently played albums
-│   ├── library/index.vue        # User playlists + liked songs
-│   ├── artists/index.vue        # Top artists
-│   ├── radio/index.vue          # Artist radio stations with related mixing
-│   ├── podcasts/index.vue       # User's shows
-│   ├── settings/index.vue       # App settings, logout
-│   ├── now-playing/index.vue    # Full-screen player with controls
-│   ├── lock/index.vue           # Black screen (M button short press)
-│   ├── auth/
-│   │   ├── login.vue            # QR code auth screen
-│   │   ├── callback.vue         # OAuth callback handler
-│   │   └── network.vue          # WiFi/Bluetooth settings
-│   ├── album/index.vue          # Album detail with track list
-│   ├── artist/index.vue         # Artist detail
-│   └── show/index.vue           # Podcast show detail
+│   ├── recents/index.vue            # Recently played
+│   ├── library/index.vue            # Playlists
+│   ├── liked-songs/index.vue        # Liked Songs
+│   ├── playlist/index.vue           # Playlist detail
+│   ├── artists/index.vue            # Top artists
+│   ├── artist/index.vue             # Artist detail
+│   ├── album/index.vue              # Album detail
+│   ├── radio/index.vue              # Artist radio stations
+│   ├── podcasts/index.vue           # User shows
+│   ├── show/index.vue               # Show detail
+│   ├── queue/index.vue              # Playback queue
+│   ├── now-playing/index.vue        # Full-screen player
+│   ├── lock/index.vue               # Lock screen (M-button short press)
+│   ├── settings/index.vue           # Settings + blocklist + account
+│   ├── test/index.vue               # API test page (Debug section)
+│   └── auth/
+│       ├── login.vue                # QR-code auth
+│       ├── callback.vue             # OAuth callback handler
+│       └── network.vue              # Wi-Fi setup
 │
 ├── stores/
-│   ├── auth.ts                  # PKCE OAuth, token management
-│   ├── spotify.ts               # Spotify API calls, playback state
-│   ├── ui.ts                    # UI state (activeSection, gradients)
-│   └── config.ts                # Environment detection, feature flags
+│   ├── auth.ts                      # Spotify auth (Device flow + PKCE)
+│   ├── boot.ts                      # Boot sequencing
+│   ├── spotify.ts                   # Spotify API + playback state
+│   ├── ui.ts                        # UI state (gradients, overlays)
+│   └── config.ts                    # Environment + env-var flags
 │
 ├── composables/
-│   ├── useBluetooth.ts          # Bluetooth device management with auto-reconnect
-│   ├── useWiFiNetworks.ts       # WiFi scanning/connecting via Connector API
-│   ├── useButtonMapping.ts      # Preset button (1-4) long-press mapping
-│   └── useButtonAction.ts       # Button press/release handlers
+│   ├── useSettings.ts               # settings.json persistence via /device/exec
+│   ├── useNetwork.ts                # Connectivity polling
+│   ├── useWiFiNetworks.ts           # Wi-Fi scan/connect via Connector API
+│   ├── useButtonAction.ts           # Click debounce wrapper
+│   ├── useButtonMapping.ts          # Preset button (1-4) long-press mapping
+│   ├── useGlobalKeys.ts             # Global keyboard / preset routing
+│   ├── useHeartbeat.ts              # Periodic ping
+│   ├── useListNavigation.ts         # Arrow-key list navigation + Enter
+│   └── useToast.ts                  # Toast notifications
 │
 ├── router/
-│   └── index.ts                 # Vue Router routes
+│   └── index.ts                     # Vue Router routes
 │
 └── types/
-    ├── index.ts                 # Type exports
-    └── spotify.types.ts         # Spotify API types
+    ├── index.ts                     # Type exports
+    └── spotify.types.ts             # Spotify API types
 ```
 
 ## Key Features
 
 ### Authentication
-- **PKCE OAuth flow** with device code (QR code scan)
+- **Spotify Device Authorization** (default): scan QR, authorize on phone, tokens land on device — no relay needed
+- **PKCE flow** (optional): used when a custom `VITE_SPOTIFY_CLIENT_ID` is set; needs the `spotify-relay.php` relay
 - Tokens stored in `settings.json` (file-based persistence survives reboots)
 - Auto-refresh before expiry
 
@@ -225,9 +243,21 @@ nocturne-vue/src/
 - Real-time playback state polling
 - Play/Pause, Skip, Previous, Shuffle, Repeat
 - Previous under 10s into the song jumps to the previous track; 10s+ restarts the current track
-- Dial seek (knob rotation = ±10s seek)
+- Configurable wheel — see [Wheel Customization](#wheel-customization)
+- Swipe left/right on Now Playing to skip tracks (toggleable)
 - Progress bar with touch/click seek
 - Optimistic play/pause UI update (instant visual feedback)
+
+### Wheel Customization
+
+Two settings under **Settings → Playback** control the dial behavior on Now Playing:
+
+| Setting | Options | Default |
+|---------|---------|---------|
+| **Wheel Turn** | Previous / Next song · Seek ±10s | Previous / Next song |
+| **Wheel Press** | Seek +10s · Next song · Play / Pause | Seek +10s |
+
+Both actions are debounced so a wheel spin only fires once.
 
 ### Artist Radio
 - Builds radio stations from your top artists (recents + liked songs)
@@ -243,9 +273,9 @@ nocturne-vue/src/
 - Manage blocked songs in Settings
 
 ### Button Mapping (Presets 1-4)
-- **Short press**: Play mapped content
-- **Long press (2s)**: Save current playing context to button
-- Stored in localStorage (`button1Id`, `button1Type`, etc.)
+- **Short press**: Play mapped content (album/playlist/artist)
+- **Long press (~2s)**: Save current playing context to that button
+- Stored in `settings.json` under `buttonMappings` (4-slot array) — survives reboots
 
 ### Power Menu (M Button)
 - **Short press**: Toggle lock screen (black display)
@@ -254,93 +284,67 @@ nocturne-vue/src/
   - Brightness slider (1-220)
   - Auto-brightness toggle
 
-### Debug Options
+### Settings Exposed in UI
 
-The following debug and display options can be toggled in **Settings**:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Debug Overlay** | Off | Shows real-time debug logs on screen with category filtering (App, Auth, Boot, BT, Spotify, Settings). Useful for troubleshooting on-device. |
-| **Start with Now Playing** | Off | Launch directly to Now Playing screen instead of Radio after boot |
-| **Track Name Scrolling** | On | Animate long track/artist names on Now Playing |
-| **Song Change Gesture** | On | Swipe left/right on Now Playing to skip tracks |
-| **Elapsed Time** | Off | Show elapsed time instead of remaining time on progress bar |
-| **Dial Seek** | On | Use dial rotation to seek ±10 seconds |
-| **24-Hour Time** | Off | Use 24-hour format in status bar |
-| **Show Status Bar** | On | Display time and connection status at top |
+| Setting | Section | Default | Description |
+|---------|---------|---------|-------------|
+| **Start with Now Playing** | General | Off | Boot directly into Now Playing instead of Radio |
+| **Track Name Scrolling** | Playback | On | Animate long track/artist names |
+| **Swipe to Change Song** | Playback | On | Swipe left/right on Now Playing skips tracks |
+| **Wheel Turn** | Playback | Prev/Next | See [Wheel Customization](#wheel-customization) |
+| **Wheel Press** | Playback | Seek +10s | See [Wheel Customization](#wheel-customization) |
+| **Wi-Fi** | Network | — | Open Wi-Fi setup screen |
+| **Blocked Songs** | Blocklist | — | Manage blocked tracks |
+| **Debug Overlay** | Debug | Off | On-screen log viewer with category filter |
+| **API Test Page** | Debug | — | Test Spotify endpoints |
 
 Settings are stored in `/etc/nocturne/ui/settings.json` and persist across reboots.
 
 ### Network Settings
-- **WiFi**: Requires Nocturne Connector on Raspberry Pi (`172.16.42.1:20574`)
-  - Scan networks, connect with password, forget networks
-- **Bluetooth**: Via nocturned daemon (`localhost:5000`)
-  - Auto-reconnect every 2 seconds (infinite retry)
-  - Show network screen after 5 seconds of no connection
-  - Long press (800ms) to forget device
 
-### Bluetooth Features
-
-When `VITE_BLUETOOTH_ENABLED=true` (default), the following features are active:
-
-| Feature | Description |
-|---------|-------------|
-| **Discovery** | Makes Car Thing visible as "Nocturne" so your phone can find and pair with it |
-| **Pairing UI** | Shows PIN code confirmation screen when a new device tries to pair |
-| **Auto-reconnect** | Automatically reconnects to last paired device on startup |
-| **Device list** | Shows paired/connected devices in Network Settings → Bluetooth |
-| **Connect/Disconnect** | Manual connect/disconnect buttons in Bluetooth settings |
-| **Forget device** | Long-press (800ms) to remove a paired device |
-| **Fast polling** | *(Optional)* When phone connects via BT, polls Spotify every 2s for 30s to detect playback faster. Useful when using iPhone with CarPlay - detects Spotify playback quicker after getting in the car. |
-| **Network polling** | After BT connect, polls to establish internet via iPhone Personal Hotspot |
-
-**Startup Timeline:**
-1. **0s** - App starts
-2. **5s** - Bluetooth initializes (soft start delay to reduce startup load)
-3. **5s+** - Discovery starts, WebSocket connects for events
-4. **5s+** - If previously paired device exists, tries auto-reconnect
+- **Wi-Fi**: Scan, connect, and forget Wi-Fi networks via the Nocturne Connector API on `172.16.42.1:20574`.
+- **Bluetooth tethering** (iPhone Personal Hotspot): handled at the **system level** — `nocturned` pairs the device, and `public/bt-connect.sh` runs `nmcli device connect` and then deletes the auto-created NAP profile to keep iOS from disconnecting. The Vue app does not include an in-app Bluetooth pairing/device-list screen; on boot, the network component just pings twice in a row to wait for a stable tether before continuing.
 
 ## Environment Variables
 
-The app works out of the box with a shared Spotify Client ID (device auth flow). You only need to set environment variables if you want to use your own Client ID.
+The app works out of the box with a shared Spotify Client ID via the Device Authorization flow. `.env` is only needed if you want to use your own Spotify app or change runtime flags.
 
 ```bash
-# .env (optional - only if using your own Spotify app)
-VITE_SPOTIFY_CLIENT_ID=your_32_char_client_id      # Your own Client ID
-VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php  # Your relay URL
+# Auth (optional - falls back to the shared Client ID)
+VITE_SPOTIFY_CLIENT_ID_SHARED=65b708073fc0480ea92a077233ca87bd
+VITE_SPOTIFY_CLIENT_ID=                                          # Your own Client ID (enables PKCE flow)
+VITE_AUTH_RELAY_URL=https://yourdomain.com/spotify-relay.php     # Required if using PKCE flow
+VITE_REDIRECT_URI=                                               # Override OAuth callback URL (rarely needed)
 
-# Bluetooth (enabled by default)
-VITE_BLUETOOTH_ENABLED=true   # Set to false to disable all Bluetooth features
-
-# Default behavior (no .env needed):
-# - Uses shared Client ID: 65b708073fc0480ea92a077233ca87bd
-# - Uses Spotify Device Authorization flow (QR code scan)
-# - No relay server required
-# - Bluetooth enabled with discovery, pairing UI, fast polling
+# Dev / debug
+VITE_DEBUG_ENABLED=false           # true = debug logging system enabled (overlay toggleable in Settings)
+VITE_SKIP_TUTORIAL=true            # Skip tutorial screen
+VITE_ANALYTICS_ENABLED=false       # Reserved
+VITE_WIFI_NETWORKS=                # JSON array of known SSIDs/passwords for auto-fill on Wi-Fi screen
 ```
+
+Default behavior (no `.env` needed): shared Client ID, Device Authorization flow, no relay.
 
 ## API Endpoints
 
-### Nocturned (localhost:5000)
-- `GET /bluetooth/devices` - List paired devices
-- `POST /bluetooth/connect/:address` - Connect to device
-- `POST /bluetooth/disconnect/:address` - Disconnect device
-- `POST /bluetooth/remove/:address` - Forget/unpair device
-- `POST /bluetooth/discover/on` - Start discovery
-- `POST /bluetooth/discover/off` - Stop discovery
-- `GET /device/brightness` - Get brightness state
-- `POST /device/brightness/:value` - Set brightness (1-220)
-- `POST /device/brightness/auto` - Toggle auto-brightness
-- `POST /device/power/shutdown` - Shutdown device
-- `POST /device/power/reboot` - Reboot device
+Endpoints the Vue app currently calls. (Nocturned exposes more — including `/bluetooth/*` — but those are not used by this UI.)
 
-### Connector API (172.16.42.1:20574)
-- `GET /network` - Network status
-- `GET /network/scan` - Scan WiFi networks
-- `GET /network/list` - List saved networks
-- `POST /network/connect` - Connect to network
-- `POST /network/select/:id` - Select saved network
-- `DELETE /network/remove/:id` - Forget network
+### Nocturned (`127.0.0.1:5000`)
+- `GET /device/brightness` — Get current brightness + auto-brightness state
+- `POST /device/brightness/:value` — Set brightness (1-220)
+- `POST /device/brightness/auto` — Toggle auto-brightness
+- `POST /device/power/shutdown` — Shutdown
+- `POST /device/power/reboot` — Reboot
+- `POST /device/exec` — Run shell commands on device (used for `save-settings.sh` and `bt-connect.sh`)
+- `POST /device/resetcounter` — Reset boot/idle counter on the loading screen
+
+### Connector API (`172.16.42.1:20574`)
+- `GET /network` — Network status
+- `GET /network/scan` — Scan Wi-Fi networks
+- `GET /network/list` — List saved networks
+- `POST /network/connect` — Connect to network
+- `POST /network/select/:id` — Select saved network
+- `DELETE /network/remove/:id` — Forget network
 
 ## Build Configuration
 
@@ -353,16 +357,8 @@ VITE_BLUETOOTH_ENABLED=true   # Set to false to disable all Bluetooth features
 - Strict mode enabled
 - Path aliases configured
 
-## Known Differences from React Version
-
-1. **No WebSocket** for real-time network updates (polls on mount only)
-2. **Simpler reconnection** - just retries every 2s vs complex backoff
-3. **Vue reactivity** - uses `ref()` instead of `useState()`
-4. **Pinia** instead of React Context for global state
-
 ## Development Notes
 
 - Always use `<script setup lang="ts">` for components
 - Use Pinia stores for shared state, composables for reusable logic
 - Icons are simple Vue components with `currentColor` for styling
-- All CSS classes match React version exactly for visual parity
