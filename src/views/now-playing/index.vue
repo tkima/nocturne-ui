@@ -206,6 +206,12 @@ function handleWheelPress() {
   if (now - wheelPressLastFiredAt < 300) return
   wheelPressLastFiredAt = now
 
+  // Podcasts always: press = next episode
+  if (isEpisode.value) {
+    handleSkipNext()
+    return
+  }
+
   const action = getSetting('wheelPressAction')
   if (action === 'skipNext') {
     handleSkipNext()
@@ -506,9 +512,12 @@ function handleWheel(e: WheelEvent) {
     const direction = wheelDeltaAccumulator.value > 0 ? 1 : -1
     wheelDeltaAccumulator.value = 0
 
+    // Podcasts always: wheel turn = seek ±10s (ignore user setting)
+    const turnAction = isEpisode.value ? 'seek' : getSetting('wheelTurnAction')
+
     // Skip-track mode: state-based debounce.
     // Fire one skip, then ignore wheel ticks until the playing track actually changes.
-    if (getSetting('wheelTurnAction') === 'skip') {
+    if (turnAction === 'skip') {
       const currentTrackId = playback.value?.item?.id ?? null
 
       // Already triggered a skip and track hasn't changed yet → ignore this tick

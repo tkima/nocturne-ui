@@ -259,6 +259,8 @@ Two settings under **Settings → Playback** control the dial behavior on Now Pl
 
 Both actions are debounced so a wheel spin only fires once.
 
+When a podcast episode is playing, these settings are ignored: wheel turn always seeks ±10s and wheel press always jumps to the next episode.
+
 ### Artist Radio
 - Builds radio stations from your top artists (recents + liked songs)
 - Mixes in related artist tracks via a cached track pool (~50 tracks)
